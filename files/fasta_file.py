@@ -1,12 +1,10 @@
-! /home/u0173836/miniconda3/envs/basic_data_science/bin/python3
-
 from pathlib import Path
 import pandas as pd
 import sys
 
 class FastaFile:
     """
-    This class represents a FASTA file and contains method to read them.
+    This class represents a FASTA file and contains method to manipulate them.
     """
 
     def __init__(path_to_fasta: Path):
@@ -79,15 +77,15 @@ class FastaFile:
         return df_fasta
 
 
-    def toCsv(self, path_to_out: str) -> None:
+    def toCsv(self, out_file: str) -> None:
         """
         Converts this FASTA file to csv file.
         """
         # Convert output file to Path object:
-        path_to_out = Path(path_to_out)
+        out_file: Path = Path(out_file)
        
        # Make the directories if they do not exist already:
-        path_to_out.parent.mkdir(parents=True, exist_ok=True)
+        out_file.parent.mkdir(parents=True, exist_ok=True)
 
         # Create dataframe from fasta file:
         df_fasta = self.fastaToDf()

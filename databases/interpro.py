@@ -1,5 +1,7 @@
 class InterPro:
-
+    """
+    Class to interact with InterPro database
+    """
     @staticmethod
     def getPDBAccessions(interpro_accession: str) -> list:
           """
@@ -13,6 +15,7 @@ class InterPro:
           from urllib.error import HTTPError
           from time import sleep
             
+          print(f"Querying InterPro for PDB accessions associated with {interpro_accession}.")  
           # MODIFIED: format the string to accept the given interpro accession
           BASE_URL =f"https://www.ebi.ac.uk:443/interpro/api/structure/PDB/entry/InterPro/{interpro_accession}/?page_size=200"
 
@@ -59,6 +62,7 @@ class InterPro:
                   sys.stderr.write("LAST URL: " + next)
                   raise e
 
+            # This is the part that returns the identifiers, notice that it is still in the While loop. 
             for i, item in enumerate(payload["results"]):
               # MODIFIED: Storing accessions in a list instead of writing to stdout:
               result.append(item["metadata"]["accession"])
@@ -69,5 +73,7 @@ class InterPro:
               sleep(1)
 
           # MODIFIED: Return the result:
+          print(f"Got {len(result)} PDB accessions.")
+
           return result
 
