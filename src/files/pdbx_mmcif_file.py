@@ -1,10 +1,11 @@
-from pathlib import Path
+# Default library imports:
 import pandas as pd
 import sys
-from pathlib import Path
 import re
+from pathlib import Path
 
-from ..util import misc, point
+# Custom module imports:
+from .util import Point, printTriad
 
 class PDBCIFFile:
     """
@@ -25,19 +26,22 @@ class PDBCIFFile:
         
         ### INIT ###
         self.path_to_pdbcif: Path = path_to_pdbcif  # Path to the file
+        self.pdb_id: str = None
         self.df_atoms: pd.DataFrame = None  # Atom information in a dataframe. Empty by default.
         self.df_site: pd.DataFrame = None
     
     
-    def matchLoopCategory(self, category: str) -> str:
+    def matchLoopCategory(self, category: str) -> str | None:
         """
         Function to match any loop block using regular expressions.
+        Can also be used to check if the given category is present in the file. Returns None if it isn't.
 
         Input:
-            - category: The loop category to parse
+            - category: str: The loop category to parse
 
         Returns
-            - str: the loop block from its starting "#" till its ending "#" as a string
+            - str: The loop block from its starting "#" till its ending "#" as a string
+            - None: If no match is found
     
         """
        
@@ -66,28 +70,46 @@ class PDBCIFFile:
  
         # read the contents of the file as a string.
         content = self.path_to_pdbcif.read_text()
- 
+        
         # Search for the pattern, MULTILINE for correct interpretation of the '^' character:
+        print(f"Searching for '{category}' in {self.path_to_pdbcif.name}...")
         match = re.search(pattern, content, re.MULTILINE)
         
         # If there is no match, we need to inform the user:
         if match is None:
-            return f"Could not match {category}"
-
-        # We can now return the entire loop block of choice:
-        return match.group()
+            print(f"Could not match '{category}' in {self.path_to_pdbcif.name}.")
+            return None
+        
+        else:
+            # We can now return the entire matched string by calling match.group():
+            print(f"Matched '{category}' in {self.path_to_pdbcif.name}.")
+            return match.group()
 
 
     def loopCategoryToDf(self, category: str) -> pd.DataFrame: 
+        """
+        Convert any loop block, given its category name, to a pandas dataframe.
+
+        Input:
+            - category: str: The category to extract (f.e.: "atom_site")
+
+        Returns:
+            - pd.DataFrame: The loop block in a dataframe. Beware that no further processing is done. Every value is essentially a string.
+        """
+
         # Initiate list for column names and data:
-        columns = []
-        data = []
+        columns: list = []
+        data: list = []
 
         # First we extract the loop block as a string using the matchLoopCategory() function:
-        loop_block = self.matchLoopCategory(category)
+        loop_block: str = self.matchLoopCategory(category)
+
+        # If the category cannot be matched, return None
+        if loop_block is None:
+            return None
 
         # Split the string by newlines:
-        loop_block = loop_block.split("\n")
+        loop_block: list[str] = loop_block.split("\n")
 
         # Loop over the loop block, which is now a list of strings where every string is a line of text in the loop block:
         for line in loop_block:
@@ -96,15 +118,21 @@ class PDBCIFFile:
                 continue
             
             elif line.startswith(f"_{category}."):
-                # These contain the column names:
+                # These contain the column names. We need the part after the dot:
                 columns.append(line.split(".")[-1].strip())
                 continue
             
             else:
                 # What remains are the data lines. We should split them by whitespace, strip them, and add them to the data list
-                #TODO Some values are within '' and contain spaces within them. Hence, split does not work!
-                print(line.strip().split())
-                data.append(line.strip().split())
+                # Some values are enclosed within ' ' and contain spaces within them. Hence, split does not work!
+                # We have to solve this with regex:
+                pattern: str = r"[^\s']+|'[^']*'"  # AI generated, matches anything that is not a whitespace or ' OR something enclosed within ''
+                
+                # findall will return all matches as list:
+                data_line: list = re.findall(pattern, line)
+                
+                # Append to the data list
+                data.append(data_line)
 
         # Now we can convert the columns and data list into a dataframe and return it:
         return pd.DataFrame(columns=columns, data=data)
@@ -263,7 +291,10 @@ class PDBCIFFile:
         """
         # Print a pretty ASCII art triad:
         print("Looking for the following triad(s):")
-        misc.printTriad(res1, res2, res3, atom1, atom2, atom3, min_dist_1_2, min_dist_2_3, min_dist_3_1, max_dist_1_2, max_dist_2_3, max_dist_3_1)
+        printTriad(res1, res2, res3, atom1, atom2, atom3, min_dist_1_2, min_dist_2_3, min_dist_3_1, max_dist_1_2, max_dist_2_3, max_dist_3_1)
+        
+        # Define the atom loop block as a dataframe
+        df_atoms = self.loopCategoryToDf("atom_site")
 
         # Initiate empty lists to store distances between pairs of Points (atoms associated to residue numbers):
         distances_1_2: list = []
@@ -331,21 +362,53 @@ class PDBCIFFile:
         print(f"{res3}: {res3_set}")
                     
 
+    def plot2DStructure(self):
+        pass
 
-def main():
-    path_to_pdb = Path('/home/green/projects/bio/biolib/5XJH.cif')
-        
-    my_file = PDBCIFFile(path_to_pdb)
+    def get2DStructure(self):
+        pass
 
-    print(my_file.matchLoopCategory('pdbx_audit_revision_group'))
-    print(my_file.loopCategoryToDf('pdbx_audit_revision_group'))  
+    def openPyMol(self):
+        pass
 
-    #my_file.atomsToDf()
+    def openChimera(self):
+        pass
     
-    #my_file.findTriads('SER', 'HIS',                        'ASP',                       'OG',                        'ND1',                        'OD1',                        1,                        1,                        6,                        5,                        4,                        7)
-    
-    
-if __name__ == "__main__":
-    main()
+    def getStructSite(self): 
+        pass
 
+# Test triad Ser-His-Asp:
+#my_file.findTriads('SER', 'HIS', 'ASP', 'OG', 'ND1', 'OD1', 1, 1, 6, 5, 4, 7)
    
+class PDBCIFFileCollection():
+    """
+    Class that represents a collection of PDBx/mmCIF files and methods to manipulate them.
+    """
+
+    def __init__(self, path_to_folder: Path):
+        pass
+
+    def summarize(self):
+        pass
+
+    def getNumberOfMutants(self):
+        pass
+
+    def getNumberOfLigandBound(self):
+        pass
+
+    def getLigands(self):
+        pass
+
+    def alignPairwise(self):
+        pass
+
+    def alignAll(self):
+        pass
+
+    def plotSimilarityNetwork(self):
+        pass
+
+    
+
+
