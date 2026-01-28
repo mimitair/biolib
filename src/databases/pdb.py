@@ -63,13 +63,3 @@ class PDB:
 
         return None        
  
-def main():
-    out_dir = Path("/home/u0173836/playground/downloads")
-
-    PDB.downloadCifFromEC("3.1.1.1", out_dir)
-    
-
-
-if __name__ == "__main__":
-    main()
-

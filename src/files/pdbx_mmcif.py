@@ -4,12 +4,12 @@ import sys
 import re
 from pathlib import Path
 
-# Custom module imports:
-from .util import Point, printTriad
+# Custom imports:
+from .util import Point
 
 class PDBCIFFile:
     """
-    This class represents a PDBx/mmCIF file as described in https://mmcif.wwpdb.org/
+    This class represents a PDBx/mmCIF file as described in https://mmcif.wwpdb.org/, and contains methods to parse and manipulate them.
     """
     def __init__(self, path_to_pdbcif: Path):
         ### DEFENSIVE CHECKS ###
@@ -25,15 +25,12 @@ class PDBCIFFile:
             sys.exit()
         
         ### INIT ###
-        self.path_to_pdbcif: Path = path_to_pdbcif  # Path to the file
-        self.pdb_id: str = None
-        self.df_atoms: pd.DataFrame = None  # Atom information in a dataframe. Empty by default.
-        self.df_site: pd.DataFrame = None
+        self.path_to_pdbcif: Path = path_to_pdbcif  # Path to the PDBx/mmCIF file.
     
     
     def matchLoopCategory(self, category: str) -> str | None:
         """
-        Function to match any loop block using regular expressions.
+        Function to match any loop block category using regular expressions.
         Can also be used to check if the given category is present in the file. Returns None if it isn't.
 
         Input:
@@ -86,7 +83,7 @@ class PDBCIFFile:
             return match.group()
 
 
-    def loopCategoryToDf(self, category: str) -> pd.DataFrame: 
+    def loopCategoryToDf(self, category: str) -> pd.DataFrame | None: 
         """
         Convert any loop block, given its category name, to a pandas dataframe.
 
@@ -95,6 +92,7 @@ class PDBCIFFile:
 
         Returns:
             - pd.DataFrame: The loop block in a dataframe. Beware that no further processing is done. Every value is essentially a string.
+            - None: If the category cannot be found.
         """
 
         # Initiate list for column names and data:
@@ -137,51 +135,34 @@ class PDBCIFFile:
         # Now we can convert the columns and data list into a dataframe and return it:
         return pd.DataFrame(columns=columns, data=data)
 
-    
-    def atomsToDf(self): 
+    def getHeteroAtoms(self) -> set:
         """
-        Reads this PDBx/mmCIF file and extracts the atom information into a pandas dataframe.
-        Identifies the '_atom_site' category and stores every attribute as a column name.
-        Then identifies every line that starts with 'ATOM' and fills the dataframe with it.
-        The atoms dataframe is then stored internally.
+        Returns a set of hetero atoms (labeled as HETATM) in the atom_site category
+
+        Input:
+            - no_water: bool: Omit "HOH" from the result
+
+        Returns:
+            - set: A set of HETATM names in this PDBx/mmCIF file. Empty set if nothing is found
+
         """
-        
-        print(f"Extracting atoms from {self.path_to_pdbcif.name}.")
-        
-        atom_site_attributes: list = []  # list of strings
-        atoms: list = []  # list of lists
-        
-        # Open the PDB file:
-        with self.path_to_pdbcif.open(mode='r') as pdb_file:
-            # Iterate over each line
-            for line in pdb_file:
-                # Extract the category attributes:
-                if line.startswith("_atom_site."):  # The dot is necessary to avoid _atom_sites category being parsed
-                    # Divide the line at the dot symbol
-                    attribute = line.strip().split(".")[-1] # Part that comes after the dot
-                    # Append to the attributes list
-                    atom_site_attributes.append(attribute)
-                    
-                # If the line starts with "ATOM"
-                elif line.startswith("ATOM"):
-                        # Strip new lines and split the string at every whitespace:
-                        line = line.strip().split()
-                        # Now we append this list as a row to the atoms list:
-                        atoms.append(line)
-                
-            # Now we pour this into a dataframe:
-            df = pd.DataFrame(data=atoms, columns=atom_site_attributes)
-            
-            # Drop the redundant 'group_PDB' column and set the index to the id attribute:
-            df = df.drop(columns=['group_PDB'])
-            df = df.set_index('id')
-            
-            print(f"Extracted {df.shape[0]} atoms and {df.shape[1]} attributes.")
-            
-        # Store internally:
-        self.df_atoms = df
-            
-        return None
+        # Convert the atom_site category to a dataframe:
+        df_atoms = self.loopCategoryToDf('atom_site')
+
+        # Return the 'label_comp_id' column for each row where 'group_PDB' == 'HETATM' as a set
+        return set(df_atoms[df_atoms['group_PDB'] == 'HETATM']['label_comp_id'].to_list())
+
+
+    def getSequence(self) -> dict:
+        """
+        Returns the amino acid sequence of the given entity
+        """
+
+        pass
+
+    ##################################################
+    ##### EVERYTHING UNDERNEATH IS NOT FUNCTIONAL ####
+    ##################################################
     
     def residueNumberToResidueName(self, residue_number: int) -> str:
         """
@@ -289,6 +270,9 @@ class PDBCIFFile:
         Returns:
             ?
         """
+        # Import the Point class and printTriad function::
+        from .util import Point, printTriad
+
         # Print a pretty ASCII art triad:
         print("Looking for the following triad(s):")
         printTriad(res1, res2, res3, atom1, atom2, atom3, min_dist_1_2, min_dist_2_3, min_dist_3_1, max_dist_1_2, max_dist_2_3, max_dist_3_1)
@@ -296,12 +280,17 @@ class PDBCIFFile:
         # Define the atom loop block as a dataframe
         df_atoms = self.loopCategoryToDf("atom_site")
 
-        # Initiate empty lists to store distances between pairs of Points (atoms associated to residue numbers):
+        # Initiate empty lists to store distances between pairs of Points (atoms):
         distances_1_2: list = []
         distances_2_3: list = []
         distances_3_1: list = []
         
+        # Extract only the rows where residue name and atom name match what is given.
+        df_atoms = self.df_atoms.loc[(self.df_atoms['label_comp_id'] == residue_name) & (self.df_atoms['label_atom_id'] == atom_name)]
+
         # Store each given atom in a {residue_number : Point} dictionary
+         ## do this directly with pandas, needs further implementation, use dict comprehension?
+        res1_points: dict
         res1_points: dict = self.residueAtomNamesToPoints(res1, atom1)
         res2_points: dict = self.residueAtomNamesToPoints(res2, atom2)
         res3_points: dict = self.residueAtomNamesToPoints(res3, atom3)
@@ -312,7 +301,7 @@ class PDBCIFFile:
         for key1, point1 in res1_points.items():  # key1=residue number, point1=Point object representing an atom of the aa residue
             # Iterate over the given atoms of residue 2:
             for key2, point2 in res2_points.items():
-                distance_1_2 = point1.distance(point2)  # Distance between p1 and p2 (see Point class)
+                distance_1_2 = point1.distance(point2)  # Distance between p1 and p2 (see Point class in util)
                 # If it falls within the given thresholds, append to the list:
                 if (distance_1_2 >= min_dist_1_2) & (distance_1_2 <= max_dist_1_2):
                     distances_1_2.append((key1, key2, distance_1_2))  # Append to list
