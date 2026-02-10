@@ -1,14 +1,10 @@
-from files.pdbx_mmcif import PDBCIFFile
+from files.pdbcif import PDBCIFFile
 from pathlib import Path
 
 def main():
-    my_file = PDBCIFFile(Path("5XJH.cif"))
+    my_file = PDBCIFFile(Path("/home/green/projects/bio/data/260131_pdb_ec3.1.1.74/1XZL_full.cif"))
     
-    df_atoms = my_file.loopCategoryToDf("atom_site")
-
-    ligands = my_file.getHeteroAtoms(True)
-
-    print(ligands)
+    print(my_file.getHeteroAtoms())
     
 if __name__ == "__main__":
     main()

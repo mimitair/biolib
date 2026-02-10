@@ -25,8 +25,7 @@ class PDBCIFFile:
             sys.exit()
         
         ### INIT ###
-        self.path_to_pdbcif: Path = path_to_pdbcif  # Path to the PDBx/mmCIF file.
-    
+        self.path_to_pdbcif: Path = path_to_pdbcif  # Path to the PDBx/mmCIF
     
     def matchLoopCategory(self, category: str) -> str | None:
         """
@@ -122,9 +121,11 @@ class PDBCIFFile:
             
             else:
                 # What remains are the data lines. We should split them by whitespace, strip them, and add them to the data list
-                # Some values are enclosed within ' ' and contain spaces within them. Hence, split does not work!
-                # We have to solve this with regex:
-                pattern: str = r"[^\s']+|'[^']*'"  # AI generated, matches anything that is not a whitespace or ' OR something enclosed within ''
+                # PROBLEM: Some values are enclosed within ' ' and contain spaces within them. Hence, split does not work!
+                # FIX: Use regex:
+                # PROBLEM: Some carbon atoms are labeled as "C1'", so this regex pattern does not work because it will start matching everything between that apostroph and the next.
+                # FIX: Simply put a space before the first apostophe of the second pattern. This prevents C1' <multiple values> C1' from being matched, but it will match <whitespace>'<some value>' 
+                pattern: str = r"[^\s']+| '[^']*'"  # AI generated, matches anything that is not a whitespace or ' OR something enclosed within '' and preceded by a space.
                 
                 # findall will return all matches as list:
                 data_line: list = re.findall(pattern, line)
@@ -138,9 +139,6 @@ class PDBCIFFile:
     def getHeteroAtoms(self) -> set:
         """
         Returns a set of hetero atoms (labeled as HETATM) in the atom_site category
-
-        Input:
-            - no_water: bool: Omit "HOH" from the result
 
         Returns:
             - set: A set of HETATM names in this PDBx/mmCIF file. Empty set if nothing is found
@@ -350,7 +348,9 @@ class PDBCIFFile:
         print(f"{res2}: {res2_set}")
         print(f"{res3}: {res3_set}")
                     
-
+    def alignTo(self, other: 'PDBCIFFile'):
+        pass
+    
     def plot2DStructure(self):
         pass
 
@@ -375,7 +375,20 @@ class PDBCIFFileCollection():
     """
 
     def __init__(self, path_to_folder: Path):
-        pass
+        ### DEFENSIVE CHECKS:
+        if not isinstance(path_to_folder, Path):
+          pass
+
+        if not path_to_folder.is_dir():
+            pass
+
+        if not path_to_folder.exists():
+            pass
+
+        self.pdbcif_files: list = [PDBCIFFile(child) for child in path_to_folder.iterdir()]
+
+
+        return None
 
     def summarize(self):
         pass
