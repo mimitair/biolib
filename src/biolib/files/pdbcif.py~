@@ -4,9 +4,6 @@ import sys
 import re
 from pathlib import Path
 
-# Custom imports:
-from .util import Point
-
 class PDBCIFFile:
     """
     This class represents a PDBx/mmCIF file as described in https://mmcif.wwpdb.org/, and contains methods to parse and manipulate them.
@@ -25,12 +22,119 @@ class PDBCIFFile:
             sys.exit()
         
         ### INIT ###
-        self.path_to_pdbcif: Path = path_to_pdbcif  # Path to the PDBx/mmCIF
-    
+        self.file_path: Path = path_to_pdbcif  # Path to the PDBx/mmCIF
+        self.file_name: str = path_to_pdbcif.name  # Name of the file
+        self.file_contents: str = path_to_pdbcif.read_text()  # Content of the file as a string
+
+    def matchCategory(self, category: str) -> str | None:
+        """
+        Matches any non-loop category and returns the data block as a string
+
+        Input:
+            - category: the desired category to extract
+
+        Returns:
+            - str: the data block as a string
+            - None: if no match is found
+        """
+        # Define the pattern:
+        pattern = rf"#\s*\n_{category}[^#]+#"
+
+        # Search in the file contents:
+        m = re.search(pattern, self.file_contents)
+
+        # return the full match if one was found:
+        if m is not None:
+            return m.group()
+        else:
+            return None
+        
+    def categoryToDict(self, category: str) -> dict | None:
+        """
+        Extract all key/value pairs belonging to a given CIF category
+        (non-loop blocks only).
+
+        Input:
+            - category: str: Name of the category to extract
+        
+        Returns:
+            - dict: {field_name : value_string}.
+            - None: If the category could not be matched.
+        """
+        # Pattern for CIF semicolon-delimited multiline values
+        semicolon_value = r"""
+            ;                       # opening semicolon
+            ([\s\S]*?)              # non-greedy capture of all characters
+            ;                       # closing semicolon on its own line
+        """
+
+        # Pattern for normal (single-line) values
+        single_value = r"(\S+)"
+
+        # Full regex:
+        # 1. Match keys like: _entity_poly.xxx
+        # 2. Match either:
+        #       - a semicolon block
+        #       - or a single token
+        pattern = re.compile(
+            rf"""
+            _{category}\.(\S+)              # group(1): the field name after the dot
+            \s*                             # whitespace
+            (?:                             # start value group
+                {semicolon_value}           # group(2): multiline value OR
+                |                           # OR
+                {single_value}              # group(3): single-line token
+            )
+            #
+            """,
+            re.VERBOSE
+        )
+
+
+
+        # First match the data block of the category as a string:
+        data_block: str = self.matchCategory(category)
+
+        # If the category was found:
+        if data_block is not None:
+            # Inititate result dictionary:
+            result = {}
+            
+            # Iterate over the lines that matched the pattern:
+            for match in pattern.finditer(data_block, re.MULTILINE):
+                # Extract the field name:
+                field = match.group(1)
+                # Extract the value, which is either a semicolon multiline value, or a single value
+                if match.group(2) is not None:
+                    # Multiline value: strip trailing newline and newlines inside the match
+                    value = match.group(2).strip().replace("\n", "")
+                else:
+                    value = match.group(3).strip()
+
+                # Add the result in the dictionary:
+                result[field] = value
+
+            # Return the result dictionary:
+            return result
+
+        # If no match was found, return None:
+        else:
+            return None
+
+
     def matchLoopCategory(self, category: str) -> str | None:
         """
         Function to match any loop block category using regular expressions.
-        Can also be used to check if the given category is present in the file. Returns None if it isn't.
+        Can also be used to check if the given category is present in the file.
+        Returns None if it isn't.
+
+        The following pattern is matched:
+
+            #
+            loop_
+            _<category>
+            <Anything that is not a hashtag>
+            #
 
         Input:
             - category: str: The loop category to parse
@@ -38,47 +142,19 @@ class PDBCIFFile:
         Returns
             - str: The loop block from its starting "#" till its ending "#" as a string
             - None: If no match is found
-    
         """
-       
-        # First we construct a regular expression pattern to capture a loop block
-        # Let's break it down:
-        # Group 1 (start of the loop block): "(^#\s*\n^loop_\s*\n)"
-        #       "^" matches the start of the string
-        #       "#" is the hashtag that ends and starts a new data block
-        #       "\s*\n" means any whitespace character zero or more times, and ending with an explicit newline.
-        #       "^loop_\s*\n" matches the start of the loop block followed by zero or more whitespaces and ending with a newline
-        #
-        # Group 2 (column names): "(^_" + re.escape(category) + r"\.[a-zA-Z_]+\s*\n)+"
-        #       "^_" matches the start of a category name
-        #       "+ re.escape(category) here we briefly interrupt the string to insert the given category name. we use re.escape to avoid whitespace character being interpreted literally in the string.
-        #       "\." matches a literal dot
-        #       "[a-zA-Z_]+" Matches any alphabetical character and underscores one or more times. So far no attribute names contain numbers or other symbols to my knowledge
-        #       "\s*\n)+" Again any whitespace or none can follow, and ending with a newline. The group is closed here and can be matched one or more times.
-        #
-        # Group 3 (the actual data lines): "(^[^#]+\s*\n)+"
-        #       "^[^#]" the first ^ matches the start of the string. the part in square brackets: anything that is NOT a hashtag. First I used [^\n]+ to match anything that is not a newline, but then the expression matched the final hashtag as well, and the match ran till the end of the file
-        #       "\s*\n" again any whitespace character zero or more times and ending with a newline
-        #       ")+" End the group and allow it to match one or more  times
-        # Finally "^#" defines the end of the loop block
+
+        pattern = rf"#\s*\nloop_\s*\n_{category}[^#]+#"
         
-        pattern = r"(^#\s*\n^loop_\s*\n)(^_" + re.escape(category) + r"\.[a-zA-Z_]+\s*\n)+(^[^#]+\s*\n)+^#"
- 
-        # read the contents of the file as a string.
-        content = self.path_to_pdbcif.read_text()
-        
-        # Search for the pattern, MULTILINE for correct interpretation of the '^' character:
-        print(f"Searching for '{category}' in {self.path_to_pdbcif.name}...")
-        match = re.search(pattern, content, re.MULTILINE)
+        # Search for the pattern:
+        match = re.search(pattern, self.file_contents)
         
         # If there is no match, we need to inform the user:
         if match is None:
-            print(f"Could not match '{category}' in {self.path_to_pdbcif.name}.")
             return None
         
         else:
             # We can now return the entire matched string by calling match.group():
-            print(f"Matched '{category}' in {self.path_to_pdbcif.name}.")
             return match.group()
 
 
@@ -122,7 +198,7 @@ class PDBCIFFile:
             else:
                 # What remains are the data lines. We should split them by whitespace, strip them, and add them to the data list
                 # PROBLEM: Some values are enclosed within ' ' and contain spaces within them. Hence, split does not work!
-                # FIX: Use regex:
+                # FIX: Use regex
                 # PROBLEM: Some carbon atoms are labeled as "C1'", so this regex pattern does not work because it will start matching everything between that apostroph and the next.
                 # FIX: Simply put a space before the first apostophe of the second pattern. This prevents C1' <multiple values> C1' from being matched, but it will match <whitespace>'<some value>' 
                 pattern: str = r"[^\s']+| '[^']*'"  # AI generated, matches anything that is not a whitespace or ' OR something enclosed within '' and preceded by a space.
@@ -151,10 +227,13 @@ class PDBCIFFile:
         return set(df_atoms[df_atoms['group_PDB'] == 'HETATM']['label_comp_id'].to_list())
 
 
-    def getSequence(self) -> dict:
+    def getAminoAcidSequences(self) -> list:
         """
-        Returns the amino acid sequence of the given entity
+        Returns the amino acid sequences of each polymer entity in this file
         """
+
+        # Extract the entity_poly category containing the sequence information:
+        sequence_data_block: dict = self.categoryToDict('entity_poly')
 
         pass
 
@@ -390,6 +469,24 @@ class PDBCIFFileCollection():
 
         return None
 
+    def writeSequencesToFasta(self, out_file: Path) -> None:
+        """
+        Writes all the amino acid sequences to a fasta file.
+        Header of the faste file is the name of the file.
+        If multiple amino acid sequences are in the cif file, they will be written as:
+            > <file_name><number>
+        """
+        
+        for pdbcif_file in self.pdbcif_files:
+            sequence_data_block: dict = pdbcif_file.categoryToDict('entity_poly')
+            if sequence_data_block is not None:
+                pass
+                
+            else:
+                print(pdbcif_file.file_name)
+        
+        
+            
     def summarize(self):
         pass
 

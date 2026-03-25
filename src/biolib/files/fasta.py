@@ -1,13 +1,13 @@
 from pathlib import Path
-import pandas as pd
 import sys
+import pandas as pd
 
 class FastaFile:
     """
-    This class represents a FASTA file and contains method to manipulate them.
+    This class represents a FASTA file, and contains methods to parse and manipulate them.
     """
 
-    def __init__(path_to_fasta: Path):
+    def __init__(self, path_to_fasta: Path):
         
         def isFasta(path_to_fasta: Path) -> bool:
             """
@@ -20,7 +20,7 @@ class FastaFile:
             if path_to_fasta.suffix in accepted_suffices:
                 return True
             
-             return False
+            return False
 
         ### DEFENSIVE CHECKS:
         if not path_to_fasta.exists():
@@ -35,11 +35,12 @@ class FastaFile:
 
         ### INIT:
         self.path_to_fasta = path_to_fasta
+        self.file_content = path_to_fasta.read_text()
 
 
     def toDict(self) -> dict:
         """
-        Read this FASTA file and return as a dictionary of header:sequence
+        Read this FASTA file and return as a dictionary of {header:sequence}
         """
         # inititate empty dictionary to store the result
         result: dict = {}
@@ -94,4 +95,12 @@ class FastaFile:
         df_fasta.to_csv(path_to_out)
         
         return None
+
+    def getAmountOfEntries(self) -> int:
+        """
+        Returns the amount of entries in this FASTA file by counting the occurence of the '>' character.
+        """
+        return self.file_content.count(">")
+
+        
     

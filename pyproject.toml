@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "biolib"
+version = "0.0.1"
+dependencies = [
+    "rcsb-api",
+    "pandas"
+]
+requires-python = ">=3.9"
+authors = [{name = "Miguel Biltjes", email = "miguel.biltjes@kuleuven.be"}]
+description = "General purpose bioinformatics"
+readme = "README.md"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
