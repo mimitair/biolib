@@ -1,42 +1,82 @@
 # Default library imports:
-import pandas as pd
 import sys
 import re
 from pathlib import Path
+import logging
 
-class PDBCIFFile:
+# External libraries:
+import pandas as pd
+from parsnip import CifFile
+import numpy as np
+
+# Logger config:
+logger = logging.getLogger(__name__)
+
+class PdbCifFile:
     """
     This class represents a PDBx/mmCIF file as described in https://mmcif.wwpdb.org/, and contains methods to parse and manipulate them.
     """
-    def __init__(self, path_to_pdbcif: Path):
+    def __init__(self, path_to_pdbcif: Path) -> None:
+        """
+        Initializes the PdbCifFFile object.
+        
+        Input:
+            - path_to_pdbcif: Path: Path object to the cif file.
+
+        Returns:
+            - None
+        """
+        logger.info("--- Initializing PdbCifFile object ---")
+        
         ### DEFENSIVE CHECKS ###
         if not isinstance(path_to_pdbcif, Path):
-            raise TypeError("Path to PDB/mmCIF file must be a Path object.")
+            raise TypeError("Path to PDB/mmCIF file must be a Path object. Convert it to a Path object before initiating the class.")
         
         if not path_to_pdbcif.exists():
-            print(f"{path_to_pdbcif} does not exist.")
-            sys.exit()
+            raise FileNotFoundError(f"{path_to_pdbcif} does not exist. Check if you have provided the correct file path.")
             
         if not path_to_pdbcif.is_file():
-            print(f"{path_to_pdbcif} is not a file.")
-            sys.exit()
-        
-        ### INIT ###
-        self.file_path: Path = path_to_pdbcif  # Path to the PDBx/mmCIF
-        self.file_name: str = path_to_pdbcif.name  # Name of the file
-        self.file_contents: str = path_to_pdbcif.read_text()  # Content of the file as a string
+            raise FileNotFoundError(f"{path_to_pdbcif} is not a file. Check if you have provided a file path instead of a directory.")
 
+        if not  path_to_pdbcif.suffix == '.cif':
+            raise ValueError(f"{path_to_pdbcif} is not a .cif file. This class only accepts .cif files.")
+        
+        logger.info("Defensive checks OK.")
+
+        ### INIT ###
+        self.file_path: Path = path_to_pdbcif.resolve()  # Resolved path to the CIF file
+        self.file_name: str = path_to_pdbcif.name  # Name of the file
+        self.parsnip_cif = CifFile(path_to_pdbcif)  # The given cif file as a parsnip CifFile object
+
+        logger.info(f"Full path to CIF file: {self.file_path}")        
+
+    def countDataBlocks(self) -> int:
+        """
+        Returns the total amount of data blocks in this cif file.
+        """
+        return self.file_path.read_text().count('#') -1
+
+    def countLoopBlocks(self) -> int:
+        """
+        Returns the amount of loop data blocks in this cif file.
+        """
+        return self.file_path.read_text().count('loop_')
+        
     def matchCategory(self, category: str) -> str | None:
         """
-        Matches any non-loop category and returns the data block as a string
+        Matches any non-loop category through regular expressions, and returns the data block as a string.
+        Can be used to check if a certain category/data block is present in the CIF file.
 
         Input:
-            - category: str: the desired category to extract
+            - category: str: the desired category to extract.
 
         Returns:
             - str: the data block as a string
             - None: if no match is found
         """
+        # Extract file contents:
+        file_contents: str = self.file_path.read_text()  # Content of the file as a string.
+        
         # Define the pattern:
         pattern = rf"#\s*\n_{category}[^#]+#"
 
@@ -48,11 +88,45 @@ class PDBCIFFile:
             return m.group()
         else:
             return None
-        
-    def categoryToDict(self, category: str) -> dict | None:
+
+    def matchLoopCategory(self, category: str) -> str | None:
         """
-        Extract all key/value pairs belonging to a given CIF category
-        (non-loop blocks only).
+        Matches any loop block category/data block using regular expressions.
+        Can also be used to check if the given category is present in the file.
+        Returns None if it isn't.
+        The following pattern is matched:
+
+            #
+            loop_
+            _<category>
+            <Anything that is not a hashtag>
+            #
+
+        Input:
+            - category: str: The loop category to parse
+
+        Returns
+            - str: The loop block from its starting "#" till its ending "#" as a string
+            - None: If no match is found
+        """
+        file_contents: str = self.file_path.read_text()  # Content of the file as a string.
+        
+        pattern = rf"#\s*\nloop_\s*\n_{category}[^#]+#"
+        
+        # Search for the pattern:
+        match = re.search(pattern, file_contents)
+        
+        # If there is no match, return None:
+        if match is None:
+            return None        
+        else:
+            # We can now return the entire matched string by calling match.group():
+            return match.group()
+
+        
+    def categoryToDict(self, category: str) -> dict[str, str] | None:
+        """
+        Extract all key/value pairs belonging to a given CIF category (non-loop blocks only).
 
         Input:
             - category: str: Name of the category to extract
@@ -62,11 +136,7 @@ class PDBCIFFile:
             - None: If the category could not be matched.
         """
         # Pattern for CIF semicolon-delimited multiline values
-        semicolon_value = r"""
-            ;                       # opening semicolon
-            ([\s\S]*?)              # non-greedy capture of all characters
-            ;                       # closing semicolon on its own line
-        """
+        semicolon_value = r";([\s\S]*);"
 
         # Pattern for normal (single-line) values
         single_value = r"(\S+)"
@@ -90,8 +160,6 @@ class PDBCIFFile:
             re.VERBOSE
         )
 
-
-
         # First match the data block of the category as a string:
         data_block: str = self.matchCategory(category)
 
@@ -100,7 +168,7 @@ class PDBCIFFile:
             # Inititate result dictionary:
             result = {}
             
-            # Iterate over the lines that matched the pattern:
+            # Iterate over all non-overlapping matches:
             for match in pattern.finditer(data_block, re.MULTILINE):
                 # Extract the field name:
                 field = match.group(1)
@@ -120,43 +188,6 @@ class PDBCIFFile:
         # If no match was found, return None:
         else:
             return None
-
-
-    def matchLoopCategory(self, category: str) -> str | None:
-        """
-        Function to match any loop block category using regular expressions.
-        Can also be used to check if the given category is present in the file.
-        Returns None if it isn't.
-
-        The following pattern is matched:
-
-            #
-            loop_
-            _<category>
-            <Anything that is not a hashtag>
-            #
-
-        Input:
-            - category: str: The loop category to parse
-
-        Returns
-            - str: The loop block from its starting "#" till its ending "#" as a string
-            - None: If no match is found
-        """
-
-        pattern = rf"#\s*\nloop_\s*\n_{category}[^#]+#"
-        
-        # Search for the pattern:
-        match = re.search(pattern, self.file_contents)
-        
-        # If there is no match, we need to inform the user:
-        if match is None:
-            return None
-        
-        else:
-            # We can now return the entire matched string by calling match.group():
-            return match.group()
-
 
     def loopCategoryToDf(self, category: str) -> pd.DataFrame | None: 
         """
@@ -214,7 +245,7 @@ class PDBCIFFile:
 
     def getHeteroAtoms(self) -> set:
         """
-        Returns a set of hetero atoms (labeled as HETATM) in the atom_site category
+        Returns a set of hetero atoms (labeled as 'HETATM') in the _atom_site category.
 
         Returns:
             - set: A set of HETATM names in this PDBx/mmCIF file. Empty set if nothing is found
@@ -226,17 +257,33 @@ class PDBCIFFile:
         # Return the 'label_comp_id' column for each row where 'group_PDB' == 'HETATM' as a set
         return set(df_atoms[df_atoms['group_PDB'] == 'HETATM']['label_comp_id'].to_list())
 
-
     def getAminoAcidSequences(self) -> list:
         """
-        Returns the amino acid sequences of each polymer entity in this file
+        Returns the amino acid sequences of each polymer entity in this file as a list of strings.
+        If the cif file has only one polymer entity, a list of length 1 is returned.
         """
+        # Depending on the amount of polymer entities, parsnip will return a single string or a numpy array of sequences:
+        if self.countPolymerEntities() > 1:
+            return [str(sequence).replace(';', '').replace('\n', '') for sequence in np.nditer(self.parsnip_cif['_entity_poly.pdbx_seq_one_letter_code'])]
 
-        # Extract the entity_poly category containing the sequence information:
-        sequence_data_block: dict = self.categoryToDict('entity_poly')
+        elif self.countPolymerEntities() == 1:
+            return self.parsnip_cif['_entity_poly.pdbx_seq_one_letter_code'].replace('\n', '').replace(';', '')
 
-        pass
+        else:
+            raise ValueError('Cif file cannot have zero or less polymer entities.')
 
+    def countEntities(self) -> int:
+        """
+        Returns the amount of entities in this cif file.
+        """
+        return len(self.parsnip_cif['_entity.id'])
+
+    def countPolymerEntities(self) -> int:
+        """
+        Counts the amount of entities labeled as 'polymer' in this cif file.
+        """
+        return len([entity for np.nditer(self.parsnip_cif['_entity.type']) if entity == 'polymer'])
+        
     ##################################################
     ##### EVERYTHING UNDERNEATH IS NOT FUNCTIONAL ####
     ##################################################
@@ -288,7 +335,7 @@ class PDBCIFFile:
         return self.df_atoms.loc[[str(atom_number)]]
     
     
-    def atomNumberToPoint(self, atom_number: int) -> Point:
+    def atomNumberToPoint(self, atom_number: int) -> 'Point':
         """
         Input:
             - atom_number: The number of the atom in the PDB/mmCIF file ('id' column).
@@ -448,7 +495,7 @@ class PDBCIFFile:
 # Test triad Ser-His-Asp:
 #my_file.findTriads('SER', 'HIS', 'ASP', 'OG', 'ND1', 'OD1', 1, 1, 6, 5, 4, 7)
    
-class PDBCIFFileCollection():
+class PdbCifFileCollection():
     """
     Class that represents a collection of PDBx/mmCIF files and methods to manipulate them.
     """

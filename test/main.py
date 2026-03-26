@@ -1,6 +1,8 @@
-from files.pdbcif import PDBCIFFile, PDBCIFFileCollection
-from files.fasta import FastaFile
+from biolib.classes.files.pdbcif import PDBCIFFile, PDBCIFFileCollection
+from biolib.classes.files.fasta import FastaFile
 from pathlib import Path
+
+def test
 
 def main():
     #my_file = PDBCIFFile(Path("test_data/3jti_full.cif"))
