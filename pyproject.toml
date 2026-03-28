@@ -6,8 +6,9 @@ build-backend = "setuptools.build_meta"
 name = "biolib"
 version = "0.0.1"
 dependencies = [
-    "rcsb-api",
-    "pandas"
+    "rcsb-api=1.6.0",
+    "pandas=3.0.1",
+    "parsnip_cif=0.5.0"
 ]
 requires-python = ">=3.9"
 authors = [{name = "Miguel Biltjes", email = "miguel.biltjes@kuleuven.be"}]

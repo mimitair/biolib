@@ -3,6 +3,7 @@ import sys
 import re
 from pathlib import Path
 import logging
+import itertools
 
 # External libraries:
 import pandas as pd
@@ -38,7 +39,7 @@ class PdbCifFile:
         if not path_to_pdbcif.is_file():
             raise FileNotFoundError(f"{path_to_pdbcif} is not a file. Check if you have provided a file path instead of a directory.")
 
-        if not  path_to_pdbcif.suffix == '.cif':
+        if not path_to_pdbcif.suffix == '.cif':
             raise ValueError(f"{path_to_pdbcif} is not a .cif file. This class only accepts .cif files.")
         
         logger.info("Defensive checks OK.")
@@ -62,136 +63,50 @@ class PdbCifFile:
         """
         return self.file_path.read_text().count('loop_')
         
-    def matchCategory(self, category: str) -> str | None:
+    def categoryExists(self, category: str) -> bool:
         """
-        Matches any non-loop category through regular expressions, and returns the data block as a string.
-        Can be used to check if a certain category/data block is present in the CIF file.
+        Returns true if the given category exists in the cif file based on regex matches. Works only for non-loop data blocks.
 
         Input:
             - category: str: the desired category to extract.
 
         Returns:
-            - str: the data block as a string
-            - None: if no match is found
+            - bool: True if the given category exists, False if not.
         """
         # Extract file contents:
         file_contents: str = self.file_path.read_text()  # Content of the file as a string.
         
         # Define the pattern:
-        pattern = rf"#\s*\n_{category}[^#]+#"
+        pattern = rf"#\s*\n{category}[^#]+#"
 
         # Search in the file contents:
-        m = re.search(pattern, self.file_contents)
+        m = re.search(pattern, file_contents)
 
-        # return the full match if one was found:
-        if m is not None:
-            return m.group()
-        else:
-            return None
+        return True if m is not None else False
 
-    def matchLoopCategory(self, category: str) -> str | None:
+    def loopCategoryExists(self, category: str) -> bool:
         """
-        Matches any loop block category/data block using regular expressions.
-        Can also be used to check if the given category is present in the file.
-        Returns None if it isn't.
-        The following pattern is matched:
-
-            #
-            loop_
-            _<category>
-            <Anything that is not a hashtag>
-            #
+        Returns True if the given loop data block exists in the cif file based on regex matches.
 
         Input:
             - category: str: The loop category to parse
 
         Returns
-            - str: The loop block from its starting "#" till its ending "#" as a string
-            - None: If no match is found
+            - bool: True if the given category exists, False if not.
         """
         file_contents: str = self.file_path.read_text()  # Content of the file as a string.
         
-        pattern = rf"#\s*\nloop_\s*\n_{category}[^#]+#"
+        pattern = rf"#\s*\nloop_\s*\n{category}[^#]+#"
         
         # Search for the pattern:
-        match = re.search(pattern, file_contents)
-        
-        # If there is no match, return None:
-        if match is None:
-            return None        
-        else:
-            # We can now return the entire matched string by calling match.group():
-            return match.group()
+        m = re.search(pattern, file_contents)
 
-        
-    def categoryToDict(self, category: str) -> dict[str, str] | None:
-        """
-        Extract all key/value pairs belonging to a given CIF category (non-loop blocks only).
-
-        Input:
-            - category: str: Name of the category to extract
-        
-        Returns:
-            - dict: {field_name : value_string}.
-            - None: If the category could not be matched.
-        """
-        # Pattern for CIF semicolon-delimited multiline values
-        semicolon_value = r";([\s\S]*);"
-
-        # Pattern for normal (single-line) values
-        single_value = r"(\S+)"
-
-        # Full regex:
-        # 1. Match keys like: _entity_poly.xxx
-        # 2. Match either:
-        #       - a semicolon block
-        #       - or a single token
-        pattern = re.compile(
-            rf"""
-            _{category}\.(\S+)              # group(1): the field name after the dot
-            \s*                             # whitespace
-            (?:                             # start value group
-                {semicolon_value}           # group(2): multiline value OR
-                |                           # OR
-                {single_value}              # group(3): single-line token
-            )
-            #
-            """,
-            re.VERBOSE
-        )
-
-        # First match the data block of the category as a string:
-        data_block: str = self.matchCategory(category)
-
-        # If the category was found:
-        if data_block is not None:
-            # Inititate result dictionary:
-            result = {}
-            
-            # Iterate over all non-overlapping matches:
-            for match in pattern.finditer(data_block, re.MULTILINE):
-                # Extract the field name:
-                field = match.group(1)
-                # Extract the value, which is either a semicolon multiline value, or a single value
-                if match.group(2) is not None:
-                    # Multiline value: strip trailing newline and newlines inside the match
-                    value = match.group(2).strip().replace("\n", "")
-                else:
-                    value = match.group(3).strip()
-
-                # Add the result in the dictionary:
-                result[field] = value
-
-            # Return the result dictionary:
-            return result
-
-        # If no match was found, return None:
-        else:
-            return None
+        return True if m is not None else False
 
     def loopCategoryToDf(self, category: str) -> pd.DataFrame | None: 
         """
         Convert any loop block, given its category name, to a pandas dataframe.
+        This function uses the parnsip external library.
 
         Input:
             - category: str: The category to extract (f.e.: "atom_site")
@@ -201,47 +116,11 @@ class PdbCifFile:
             - None: If the category cannot be found.
         """
 
-        # Initiate list for column names and data:
-        columns: list = []
-        data: list = []
+        columns: list = [column for column in list(itertools.chain(*self.parsnip_cif.loop_labels)) if column.startswith(category)]
 
-        # First we extract the loop block as a string using the matchLoopCategory() function:
-        loop_block: str = self.matchLoopCategory(category)
+        data: list = self.parsnip_cif.get_from_loops(category + '*').tolist()
 
-        # If the category cannot be matched, return None
-        if loop_block is None:
-            return None
-
-        # Split the string by newlines:
-        loop_block: list[str] = loop_block.split("\n")
-
-        # Loop over the loop block, which is now a list of strings where every string is a line of text in the loop block:
-        for line in loop_block:
-            if line.startswith("#") or line.startswith("loop_"):
-                # These are the 'paddings' and can be omitted
-                continue
-            
-            elif line.startswith(f"_{category}."):
-                # These contain the column names. We need the part after the dot:
-                columns.append(line.split(".")[-1].strip())
-                continue
-            
-            else:
-                # What remains are the data lines. We should split them by whitespace, strip them, and add them to the data list
-                # PROBLEM: Some values are enclosed within ' ' and contain spaces within them. Hence, split does not work!
-                # FIX: Use regex
-                # PROBLEM: Some carbon atoms are labeled as "C1'", so this regex pattern does not work because it will start matching everything between that apostroph and the next.
-                # FIX: Simply put a space before the first apostophe of the second pattern. This prevents C1' <multiple values> C1' from being matched, but it will match <whitespace>'<some value>' 
-                pattern: str = r"[^\s']+| '[^']*'"  # AI generated, matches anything that is not a whitespace or ' OR something enclosed within '' and preceded by a space.
-                
-                # findall will return all matches as list:
-                data_line: list = re.findall(pattern, line)
-                
-                # Append to the data list
-                data.append(data_line)
-
-        # Now we can convert the columns and data list into a dataframe and return it:
-        return pd.DataFrame(columns=columns, data=data)
+        return pd.DataFrame(data=data, columns=columns)
 
     def getHeteroAtoms(self) -> set:
         """
@@ -282,7 +161,7 @@ class PdbCifFile:
         """
         Counts the amount of entities labeled as 'polymer' in this cif file.
         """
-        return len([entity for np.nditer(self.parsnip_cif['_entity.type']) if entity == 'polymer'])
+        return len([entity for entity in np.nditer(self.parsnip_cif['_entity.type']) if entity == 'polymer'])
         
     ##################################################
     ##### EVERYTHING UNDERNEATH IS NOT FUNCTIONAL ####
