@@ -3,7 +3,7 @@ class InterPro:
     Class to interact with InterPro database
     """
     @staticmethod
-    def getPDBAccessions(interpro_accession: str) -> list:
+    def getPDBAccessionsFromInterproIdentifier(interpro_identifier: str) -> list:
           """
           This function was copied from the interpro website
           https://www.ebi.ac.uk/interpro/result/download/#/structure/PDB/entry/InterPro/IPR029058/|accession
@@ -15,16 +15,15 @@ class InterPro:
           from urllib.error import HTTPError
           from time import sleep
             
-          print(f"Querying InterPro for PDB accessions associated with {interpro_accession}.")  
+          print(f"Querying InterPro for PDB accessions associated with {interpro_identifier}.")  
           # MODIFIED: format the string to accept the given interpro accession
-          BASE_URL =f"https://www.ebi.ac.uk:443/interpro/api/structure/PDB/entry/InterPro/{interpro_accession}/?page_size=200"
+          BASE_URL =f"https://www.ebi.ac.uk:443/interpro/api/structure/PDB/entry/InterPro/{interpro_identifier}/?page_size=200"
 
           #disable SSL verification to avoid config issues
           context = ssl._create_unverified_context()
 
           next = BASE_URL
           last_page = False
-         
           attempts = 0
 
           # MODIFIED: Empty list to store accession IDs
@@ -72,8 +71,6 @@ class InterPro:
             if next:
               sleep(1)
 
-          # MODIFIED: Return the result:
-          print(f"Got {len(result)} PDB accessions.")
-
+          # MODIFIED: return the result
           return result
 

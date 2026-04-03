@@ -1,6 +1,7 @@
 from pathlib import Path
 import sys
 import pandas as pd
+import re
 
 class FastaFile:
     """
@@ -34,8 +35,7 @@ class FastaFile:
 
 
         ### INIT:
-        self.path_to_fasta = path_to_fasta
-        self.file_content = path_to_fasta.read_text()
+        self.path_to_fasta: Path = path_to_fasta
 
 
     def toDict(self) -> dict:
@@ -102,5 +102,22 @@ class FastaFile:
         """
         return self.file_content.count(">")
 
+    def matchPattern(self, pattern: str) -> list[(str, int, int, str)]:
+        """
+        Returns a list of all entries in this fasta file that match the given pattern
+        Each element of the list is a tuple formatted as: (entry header, start position, end position, matched pattern)
+        All non-overlapping matches are returned, meaning that a sequence can have multiple matches.
+        Returns an empty list if no match is found
+        """
+        result = []
+        pattern = re.compile(pattern)
         
+        for header, sequence in self.toDict().items():
+            matches = pattern.finditer(sequence)
+            for m in matches:
+                result.append((header, m.start(), m.end(), m.group()))
+
+        return result
+    
+
     
