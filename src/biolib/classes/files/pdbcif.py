@@ -45,23 +45,23 @@ class PdbCifFile:
         logger.info("Defensive checks OK.")
 
         ### INIT ###
-        self.file_path: Path = path_to_pdbcif.resolve()  # Resolved path to the CIF file
-        self.file_name: str = path_to_pdbcif.name  # Name of the file
-        self.parsnip_cif = CifFile(path_to_pdbcif)  # The given cif file as a parsnip CifFile object
+        self.full_path: Path = path_to_pdbcif.resolve()  # Resolved path to the CIF file
+        self.name: str = path_to_pdbcif.stem  # Name of the file without suffix and prefix
+        #parsnip: CifFile = CifFile(path_to_pdbcif)  # The given cif file as a parsnip CifFile object
 
-        logger.info(f"Full path to CIF file: {self.file_path}")        
+        logger.info(f"Full path to CIF file: {self.full_path}")        
 
     def countDataBlocks(self) -> int:
         """
         Returns the total amount of data blocks in this cif file.
         """
-        return self.file_path.read_text().count('#') -1
+        return self.full_path.read_text().count('#') -1
 
     def countLoopBlocks(self) -> int:
         """
         Returns the amount of loop data blocks in this cif file.
         """
-        return self.file_path.read_text().count('loop_')
+        return self.full_path.read_text().count('loop_')
         
     def categoryExists(self, category: str) -> bool:
         """
@@ -74,7 +74,7 @@ class PdbCifFile:
             - bool: True if the given category exists, False if not.
         """
         # Extract file contents:
-        file_contents: str = self.file_path.read_text()  # Content of the file as a string.
+        file_contents: str = self.full_path.read_text()  # Content of the file as a string.
         
         # Define the pattern:
         pattern = rf"#\s*\n{category}[^#]+#"
@@ -94,7 +94,7 @@ class PdbCifFile:
         Returns
             - bool: True if the given category exists, False if not.
         """
-        file_contents: str = self.file_path.read_text()  # Content of the file as a string.
+        file_contents: str = self.full_path.read_text()  # Content of the file as a string.
         
         pattern = rf"#\s*\nloop_\s*\n{category}[^#]+#"
         
@@ -103,25 +103,30 @@ class PdbCifFile:
 
         return True if m is not None else False
 
-    def loopCategoryToDf(self, category: str) -> pd.DataFrame | None: 
+    def categoryToDf(self, category: str) -> pd.DataFrame | dict: 
         """
-        Convert any loop block, given its category name, to a pandas dataframe.
+        Convert any data block, given its category name, to a pandas dataframe or series.
         This function uses the parnsip external library.
 
         Input:
             - category: str: The category to extract (f.e.: "atom_site")
 
         Returns:
-            - pd.DataFrame: The loop block in a dataframe. Beware that no further processing is done. Every value is essentially a string.
-            - None: If the category cannot be found.
+            - pd.DataFrame: A loop data block as a dataframe. Beware that no further processing is done. Every value is essentially a string.
+            - dict: A non-loop data block as a dict.
+
+        Raises:
+            - ValueError: If the given category does not exist.
         """
+        if self.categoryExists(category):
+            return {key:value for key,value in self.toParsnip().pairs.items() if category + '.' in key}
+        
+        elif self.loopCategoryExists(category):
+            return pd.DataFrame([arr for arr in self.toParsnip().loops if category + '.' in ''.join(arr.dtype.names)][0].reshape(-1))
 
-        columns: list = [column for column in list(itertools.chain(*self.parsnip_cif.loop_labels)) if column.startswith(category)]
-
-        data: list = self.parsnip_cif.get_from_loops(category + '*').tolist()
-
-        return pd.DataFrame(data=data, columns=columns)
-
+        else:
+            raise ValueError(f'{category} does not exist in {self.name}')
+        
     def getHeteroAtoms(self) -> set:
         """
         Returns a set of hetero atoms (labeled as 'HETATM') in the _atom_site category.
@@ -136,32 +141,51 @@ class PdbCifFile:
         # Return the 'label_comp_id' column for each row where 'group_PDB' == 'HETATM' as a set
         return set(df_atoms[df_atoms['group_PDB'] == 'HETATM']['label_comp_id'].to_list())
 
+    def toParsnip(self):
+        return CifFile(self.full_path)
+    
     def getAminoAcidSequences(self) -> list:
         """
         Returns the amino acid sequences of each polymer entity in this file as a list of strings.
         If the cif file has only one polymer entity, a list of length 1 is returned.
+
+        Returns:
+            - list: A list of the amino acid sequences for each polymer entity in this PDBx/mmCIF file.
+
+        Raises:
+            - ValueError: If there are no polymer entities.
         """
-        # Depending on the amount of polymer entities, parsnip will return a single string or a numpy array of sequences:
-        if self.countPolymerEntities() > 1:
-            return [str(sequence).replace(';', '').replace('\n', '') for sequence in np.nditer(self.parsnip_cif['_entity_poly.pdbx_seq_one_letter_code'])]
+        # Extract the data block where we can find the amino acid sequences:
+        df: pd.DataFrame | pd.Series = self.categoryToDf('_entity_poly')
 
-        elif self.countPolymerEntities() == 1:
-            return self.parsnip_cif['_entity_poly.pdbx_seq_one_letter_code'].replace('\n', '').replace(';', '')
+        # TODO checking type every time is too slow?
+        if isinstance(df, pd.DataFrame):
+            # Extract only the 
+            df = df[(df['_entity_poly.type'] == 'polypeptide(L)') | (df['_entity_poly.type'] == 'polypetide(D)')]
+            return [seq.replace('\n', '').replace(';', '') for seq in df['_entity_poly.pdbx_seq_one_letter_code'].tolist()]
 
-        else:
-            raise ValueError('Cif file cannot have zero or less polymer entities.')
+        elif isinstance(df, dict):
+            if (df['_entity_poly.type'] == 'polypeptide(L)') or (df['_entity_poly.type'] == 'polypeptide(D)'):
+                return [df['_entity_poly.pdbx_seq_one_letter_code'].replace('\n', '').replace(';', '')]
+            else:
+                return []
 
     def countEntities(self) -> int:
         """
         Returns the amount of entities in this cif file.
         """
-        return len(self.parsnip_cif['_entity.id'])
+        return len(self.toParsnip()['_entity.id'])
 
     def countPolymerEntities(self) -> int:
         """
         Counts the amount of entities labeled as 'polymer' in this cif file.
         """
-        return len([entity for entity in np.nditer(self.parsnip_cif['_entity.type']) if entity == 'polymer'])
+        return len([entity for entity in np.nditer(self.toParsnip()['_entity.type']) if entity == 'polymer'])
+
+    def countPolypeptideEntities(self) -> int:
+        pass
+        
+
         
     ##################################################
     ##### EVERYTHING UNDERNEATH IS NOT FUNCTIONAL ####
@@ -379,37 +403,58 @@ class PdbCifFileCollection():
     Class that represents a collection of PDBx/mmCIF files and methods to manipulate them.
     """
 
-    def __init__(self, path_to_folder: Path):
-        ### DEFENSIVE CHECKS:
-        if not isinstance(path_to_folder, Path):
+    def __init__(self, path_to_cif_collection: Path):
+
+        ### DEFENSIVE CHECKS: ###
+        if not isinstance(path_to_cif_collection, Path):
           pass
 
-        if not path_to_folder.is_dir():
+        if not path_to_cif_collection.is_dir():
             pass
 
-        if not path_to_folder.exists():
+        if not path_to_cif_collection.exists():
             pass
 
-        self.pdbcif_files: list = [PDBCIFFile(child) for child in path_to_folder.iterdir()]
+        ### INIT: ###
+        self.full_path: Path = path_to_cif_collection.resolve()  # Full path to the cif collection.
+        
+        try:
+            self.pdbcif_files: list = [PdbCifFile(child) for child in path_to_cif_collection.iterdir()]
 
+        except ValueError:
+            print('Some files in this collection are not .cif files. These will be excluded from the object.')
+            self.pdbcif_files: tuple = (PdbCifFile(child) for child in path_to_cif_collection.iterdir() if child.suffix == '.cif')
 
         return None
 
+    @property
+    def size(self):
+        return len(self.pdbcif_files)
+    
     def writeSequencesToFasta(self, out_file: Path) -> None:
         """
-        Writes all the amino acid sequences to a fasta file.
-        Header of the faste file is the name of the file.
+        Writes all the amino acid sequences in this PDBxCIF file collection to a fasta file.
+        Header of each entry is the name of the file.
         If multiple amino acid sequences are in the cif file, they will be written as:
-            > <file_name><number>
+            > <name>_<number>
         """
-        
+        result: dict = {}
         for pdbcif_file in self.pdbcif_files:
-            sequence_data_block: dict = pdbcif_file.categoryToDict('entity_poly')
-            if sequence_data_block is not None:
-                pass
-                
-            else:
-                print(pdbcif_file.file_name)
+            try:
+                aa_sequences: list = pdbcif_file.getAminoAcidSequences()
+                if len(aa_sequences) > 1:
+                    for i in range(len(aa_sequences)):
+                        result[pdbcif_file.name + '_' + str((i+1))] = aa_sequences[i]
+                elif len(aa_sequences) == 1:
+                    result[pdbcif_file.name] = aa_sequences[0]
+            except TypeError:
+                print('Encounted TypeError, likely when parsing cif file using parsnip.')
+                continue
+    
+        # Write reusults to file:
+        with out_file.open('w') as f:
+            for header, sequence in result.items():
+                f.write('>' + header + '\n' + sequence + '\n')
         
         
             
