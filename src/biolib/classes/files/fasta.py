@@ -38,6 +38,14 @@ class FastaFile:
         self.path_to_fasta: Path = path_to_fasta
 
 
+
+    @property
+    def count(self):
+        """
+        Returns the amount of sequences in this fasta file.
+        """
+        return len(self.toDict())
+    
     def toDict(self) -> dict:
         """
         Read this FASTA file and return as a dictionary of {header:sequence}
@@ -108,6 +116,7 @@ class FastaFile:
         Each element of the list is a tuple formatted as: (entry header, start position, end position, matched pattern)
         All non-overlapping matches are returned, meaning that a sequence can have multiple matches.
         Returns an empty list if no match is found
+        TODO Detect overlapping matches as well?
         """
         result = []
         pattern = re.compile(pattern)
