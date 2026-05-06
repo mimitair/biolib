@@ -23,7 +23,7 @@ class FastaFile:
             
             return False
 
-        ### DEFENSIVE CHECKS:
+        ### DEFENSIVE CHECKS ###
         if not path_to_fasta.exists():
             raise FileNotFoundError(f"{path_to_fasta} does not exist.")
         
@@ -33,14 +33,11 @@ class FastaFile:
         if not isFasta(path_to_fasta):
             raise ValueError(f"The given file is not a fasta file")
 
-
-        ### INIT:
+        ### INIT ###
         self.path_to_fasta: Path = path_to_fasta
 
-
-
     @property
-    def count(self):
+    def count(self) -> int:
         """
         Returns the amount of sequences in this fasta file.
         """
@@ -103,12 +100,6 @@ class FastaFile:
         df_fasta.to_csv(path_to_out)
         
         return None
-
-    def getAmountOfEntries(self) -> int:
-        """
-        Returns the amount of entries in this FASTA file by counting the occurence of the '>' character.
-        """
-        return self.file_content.count(">")
 
     def matchPattern(self, pattern: str) -> list[(str, int, int, str)]:
         """

@@ -1,7 +1,6 @@
 #
 _entry.id TEST2
 #
-
 loop_
 _atom_site.group_PDB
 _atom_site.label_comp_id
@@ -9,7 +8,17 @@ _atom_site.label_atom_id
 _atom_site.Cartn_x
 _atom_site.Cartn_y
 _atom_site.Cartn_z
-HETATM LIG "C1'" 1.0 2.0 3.0
 ATOM   GLY  CA    0.0 0.0 0.0
-ATOM   LYS "NZ"   1.1 1.2 1.3
+ATOM   LYS NZ   1.1 1.2 1.3
+HETATM LIG C1' 1.0 2.0 3.0
 #
+loop_
+_chem_comp.formula
+_chem_comp.formula_weight
+_chem_comp.id
+_chem_comp.name
+_chem_comp.pdbx_synonyms
+'C3 H7 N O2' 69.420 ALA 'l-peptide linking' ? 
+'C6 H15 N4 O2 1' 175.2 ARG 'l-peptide linking' ?
+#
+

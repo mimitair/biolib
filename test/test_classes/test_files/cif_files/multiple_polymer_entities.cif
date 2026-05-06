@@ -1,18 +1,20 @@
 #
-_entry.id   TEST1
+_entry.id   TEST4
 #
 loop_
 _entity.id      
 _entity.type
 1   polymer
 2   polymer
+3   polymer
 #
 loop_
 _entity_poly.entity_id
 _entity_poly.type
 _entity_poly.pdbx_seq_one_letter_code
 1   polypeptide(L)  ;ACDE;
-2   polypeptide(L)  ;AGYFKR;
+2   polypeptide(D)  ;AGYFKR;
+3   polyribonucleotide   AGCT
 #
 loop_
 _atom_site.group_PDB

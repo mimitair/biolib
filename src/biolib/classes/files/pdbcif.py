@@ -122,7 +122,7 @@ class PdbCifFile:
             return {key:value for key,value in self.toParsnip().pairs.items() if category + '.' in key}
         
         elif self.loopCategoryExists(category):
-            return pd.DataFrame([arr for arr in self.toParsnip().loops if category + '.' in ''.join(arr.dtype.names)][0].reshape(-1))
+            return pd.DataFrame([arr for arr in self.toParsnip().loops if category + '.' in arr.dtype.names[0]][0].reshape(-1))
 
         else:
             raise ValueError(f'{category} does not exist in {self.name}')
@@ -150,18 +150,15 @@ class PdbCifFile:
         If the cif file has only one polymer entity, a list of length 1 is returned.
 
         Returns:
-            - list: A list of the amino acid sequences for each polymer entity in this PDBx/mmCIF file.
-
-        Raises:
-            - ValueError: If there are no polymer entities.
+            - list: A list of the amino acid sequences for each polymer entity in this PDBx/mmCIF file. Empty list if no polypeptide sequences were found
         """
         # Extract the data block where we can find the amino acid sequences:
-        df: pd.DataFrame | pd.Series = self.categoryToDf('_entity_poly')
+        df: pd.DataFrame | dict = self.categoryToDf('_entity_poly')
 
         # TODO checking type every time is too slow?
         if isinstance(df, pd.DataFrame):
-            # Extract only the 
-            df = df[(df['_entity_poly.type'] == 'polypeptide(L)') | (df['_entity_poly.type'] == 'polypetide(D)')]
+            # Extract only the rows where _entity.type == 'polypeptide' 
+            df = df.loc[(df['_entity_poly.type'] == 'polypeptide(L)') | (df['_entity_poly.type'] == 'polypeptide(D)')]
             return [seq.replace('\n', '').replace(';', '') for seq in df['_entity_poly.pdbx_seq_one_letter_code'].tolist()]
 
         elif isinstance(df, dict):
@@ -431,12 +428,18 @@ class PdbCifFileCollection():
     def size(self):
         return len(self.pdbcif_files)
     
-    def writeSequencesToFasta(self, out_file: Path) -> None:
+    def writeSequencesToFasta(self, out_file: Path) -> dict:
         """
         Writes all the amino acid sequences in this PDBxCIF file collection to a fasta file.
         Header of each entry is the name of the file.
         If multiple amino acid sequences are in the cif file, they will be written as:
             > <name>_<number>
+
+        Input:
+           - out_file: Path: The file path to which the amino acid sequences will be written
+
+        Returns:
+           -dict: Dictionary containing {'name_of_cif_file': [<list of sequences>]}
         """
         result: dict = {}
         for pdbcif_file in self.pdbcif_files:
@@ -447,15 +450,22 @@ class PdbCifFileCollection():
                         result[pdbcif_file.name + '_' + str((i+1))] = aa_sequences[i]
                 elif len(aa_sequences) == 1:
                     result[pdbcif_file.name] = aa_sequences[0]
-            except TypeError:
-                print('Encounted TypeError, likely when parsing cif file using parsnip.')
+            except TypeError as e:
+                print(f'Encountered TypeError when reading from {pdbcif_file.name}, likely when parsing cif file using parsnip.')
+                print(e)
+                continue
+            except ValueError as e:
+                print(f'Encountered ValueError when reading from {pdbcif_file.name}')
+                print(e)
                 continue
     
         # Write reusults to file:
         with out_file.open('w') as f:
             for header, sequence in result.items():
                 f.write('>' + header + '\n' + sequence + '\n')
-        
+
+        # Return the dictionary for testing purposes:
+        return result
         
             
     def summarize(self):

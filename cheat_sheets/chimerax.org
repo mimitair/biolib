@@ -1,0 +1,33 @@
+Use `help <command>` in chimerax to read documentation.
+
+** Coloring
+* Color by plDDT values with alphafold color scheme
+color bfactor palette alphafold
+
+* Color alpha-helices blue and beta-strands red
+color helix blue
+color strand red
+
+* Color gradient from N- to C-terminus
+rainbow
+rainbow /a palette darkblue:lightskyblue  # '/a' denotes the chain, use 'palette' argument to choose a gradient between two colors
+
+** Selecting 
+* Label the current selection
+label sel
+* Remove the current selection
+select clear
+* Hide water molecules and other solvents
+hide solvent
+* Show residues in a radius around a given residue
+zone /<chain>:<res_nr>
+
+** Misc
+* Show the amino acid sequence of chain a
+sequence chain /a
+
+** Measuring distances
+* Measure distance between atom1 and atom2:
+distance /<chain1>:<res_nr1>@<atom_name1> /<chain2>:<res_nr2>@<atom_name2>  # Hover over the structure to find the correct atom name, or inspect the cif file.
+* Delete distances
+distance delete

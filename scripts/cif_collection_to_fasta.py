@@ -1,6 +1,6 @@
-""" This script takes a directory of cif files as input and generates a fasta file containing all amino acid sequences.
+""" This script takes a directory of cif files as input and generates a fasta file containing all amino acid sequences of each polypeptide.
 The headers in the fasta file are the file names (no suffix).
-If there are multiple polymer entities in a cif file, a number starting from 1 will be appended to the header (e.g., <file_name>_1, <file_name>_2...)
+If there are multiple polypeptide entities in a cif file, a number starting from 1 will be appended to the header (e.g., <file_name>_1, <file_name>_2...)
 The first positional argument should contain the path to the cif file collection.
 The second positional argument specifies the output fasta file.
 
@@ -12,13 +12,13 @@ from pathlib import Path
 import sys
 
 # Custom imports:
-from biolib.classes.files.pdbcif import PdbCifFile, PdbCifFileCollection
+from biolib.classes.files.pdbcif import PdbCifFileCollection
 
 def main():
     # Read arguments:
     path_to_cif_collection: Path = Path(sys.argv[1])
-    path_to_out: Path = Path(sys.argv[2])
-    
+    path_to_out: Path = Path(sys.argv[2])    
+
     print(f'--- Converting {path_to_cif_collection} to FASTA format. ---')
 
     # Initiate PdbCifFileCollection object:
