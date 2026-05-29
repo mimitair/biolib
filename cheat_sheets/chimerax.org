@@ -1,6 +1,9 @@
 Use `help <command>` in chimerax to read documentation.
 
 ** Coloring
+* Color current selection in red
+color sel red
+
 * Color by plDDT values with alphafold color scheme
 color bfactor palette alphafold
 
