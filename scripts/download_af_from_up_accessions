@@ -1,0 +1,32 @@
+#! /usr/bin/env python3
+"""
+Download all alphafold structures from a file with uniprot IDs (one ID per line) using biotite library.
+Usage: p3 download_alphafold_from_up_accession_list <in_file> <out_dir>
+"""
+
+# imports:
+from pathlib import Path
+import sys
+from biotite.database import afdb, RequestError
+
+def main():
+    in_file: Path = Path(sys.argv[1])
+    out_dir: Path = Path(sys.argv[2])
+
+    # Read the file with uniprot ids:
+    with in_file.open('r') as f:
+        accessions: list = [line.rstrip() for line in f]
+
+    # Loop over the accessions and fetch each one individually.
+    invalid_count: int = 0
+    for acc in accessions:
+        try:
+            afdb.fetch(acc, 'cif', out_dir, verbose=True)
+        except RequestError as e:
+            print(e)
+            invalid_count += 1
+
+    print(f"{invalid_count} UniProt IDs could not be downloaded.")
+    
+if __name__ == "__main__":
+    main()

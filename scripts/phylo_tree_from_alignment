@@ -1,0 +1,75 @@
+#! /usr/bin/env python3
+"""
+Generate an unrooted phylogenetic tree from an input alignment in fasta format
+Tree is built using neighbor-joining.
+Script mostly originates from https://www.biotite-python.org/latest/examples/gallery/sequence/homology/gpcr_evolution.html.
+Slightly adapted to read input from a given alignment file.
+
+Usage: python3 phylo_tree_from_alignment <input_alignment_fasta>
+"""
+
+import sys
+from pathlib import Path
+import matplotlib.pyplot as plt
+import networkx as nx
+import biotite.sequence as seq
+import biotite.sequence.align as align
+import biotite.sequence.io.fasta as fasta
+import biotite.sequence.phylo as phylo
+
+def main():
+    # Read cli arguments:
+    in_file: Path = Path(sys.argv[1])  # alignment fasta file
+
+    # Convert in_file to biotite FastaFile object:
+    fasta_file: FastaFile = fasta.FastaFile.read(in_file)
+    
+    # Print out what was read:
+    print(f"File name: {in_file.name}\nAmount of sequences: {len(fasta_file)}")
+
+    # Extract the headers (only what comes before the first space to not overclutter the plot with node labels):
+    headers: list = [key.split(' ')[0] for key in fasta_file.keys()]
+
+    # Convert the fasta file to a biotite alignment object:
+    alignment: Alignment = fasta.get_alignment(fasta_file)
+
+    
+    # The distance measure required for the tree calculation is the
+    # percentage of non-identical amino acids in the respective two
+    # sequences
+    distances = 1 - align.get_pairwise_sequence_identity(alignment, mode="shortest")
+
+    # Create tree via neighbor joining
+    tree = phylo.neighbor_joining(distances)
+
+    # Convert to NetworkX graph
+    # For the graph visualization, the edge directions are unnecessary
+    graph = tree.as_graph().to_undirected()
+
+    # Start plotting:
+    fig = plt.figure(figsize=(8.0, 8.0))
+    ax = fig.gca()
+    ax.axis("off")
+
+    # Calculate position of nodes in the plot
+    pos = nx.kamada_kawai_layout(graph)
+    # Assign the gene names to the nodes that represent a reference index
+    node_labels = {i: name for i, name in enumerate(headers)}
+    nx.draw_networkx_edges(graph, pos, ax=ax)
+    nx.draw_networkx_labels(
+        graph,
+        pos,
+        ax=ax,
+        labels=node_labels,
+        font_size=7,
+        # Draw a white background behind the labeled nodes
+        # for better readability
+        bbox=dict(pad=0, color="white"),
+    )
+
+    fig.tight_layout()
+    plt.show()    
+
+if __name__ == "__main__":
+    main()
+    

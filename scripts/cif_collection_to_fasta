@@ -26,7 +26,7 @@ def main():
     # Initiate PdbCifFileCollection object:
     cif_collection: PdbCifFileCollection = PdbCifFileCollection(Path(path_to_cif_collection))
 
-    print(f'--- Detected {cif_collection.size} cif files in {cif_collection.full_path}. ---')
+    print(f'--- Detected {cif_collection.count} cif files in {cif_collection.full_path}. ---')
 
     # Write sequences to fasta:
     cif_collection.writeSequencesToFasta(Path(path_to_out))

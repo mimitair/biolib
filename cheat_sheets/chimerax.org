@@ -1,29 +1,40 @@
 Use `help <command>` in chimerax to read documentation.
 
 ** Coloring
+* Set background color white
+set bgColor white
 * Color current selection in red
 color sel red
-
 * Color by plDDT values with alphafold color scheme
 color bfactor palette alphafold
-
-* Color alpha-helices blue and beta-strands red
+* Color alpha-helices blue, beta-strands red, and coils yellow
 color helix blue
 color strand red
-
+color coil yellow
 * Color gradient from N- to C-terminus
 rainbow
 rainbow /a palette darkblue:lightskyblue  # '/a' denotes the chain, use 'palette' argument to choose a gradient between two colors
 
-** Selecting 
+** Selecting
+* Basic syntax
+select#model/chain:residue|atom
 * Label the current selection
 label sel
 * Remove the current selection
 select clear
 * Hide water molecules and other solvents
 hide solvent
+* Hide ligands
+hide ligand
 * Show residues in a radius around a given residue
 zone /<chain>:<res_nr>
+* Select residue x
+select :x
+* Show selection as sticks
+show sel bonds
+* Hide everything but the current selection
+hide ~sel
+hide cartoon
 
 ** Misc
 * Show the amino acid sequence of chain a

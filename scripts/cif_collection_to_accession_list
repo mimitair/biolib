@@ -1,0 +1,22 @@
+#! /usr/bin/env python3
+
+"""
+Write all the PDB accessions of a cif collection to a text file.
+Usage: cif_collection_to_accession_list <path_to_cif_collection> <path_to_output_file>
+"""
+import sys
+from pathlib import Path
+from biolib.files.pdbcif import PdbCifFileCollection
+
+def main():
+    path_to_cif_collection: Path = Path(sys.argv[1])
+    path_to_out_file: Path = Path(sys.argv[2])
+
+    cif_collection: PdbCifFileCollection = PdbCifFileCollection(path_to_cif_collection)
+
+    cif_collection.writePDBIDsToFile(path_to_out_file)
+
+if __name__ == "__main__":
+    main()
+    
+    

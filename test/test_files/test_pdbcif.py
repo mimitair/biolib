@@ -108,7 +108,8 @@ class TestPdbCifFile(unittest.TestCase):
         self.assertEqual(3, self.cif_multiple_polymer_entities.countPolymerEntities())
 
     def test_countPolypeptideEntities(self):
-        pass
+        self.assertEqual(1, self.cif_simple.countPolypeptideEntities())
+        self.assertEqual(2, self.cif_multiple_polymer_entities.countPolypeptideEntities())
 
     def test_atomSiteToDf_simple(self):
         # Define what the dataframe should look like (with correct typing):
@@ -119,8 +120,15 @@ class TestPdbCifFile(unittest.TestCase):
         # Do the test:
         pd.testing.assert_frame_equal(cif_simple_atom_site, self.cif_simple.atomSiteToDf(), check_dtype=True, check_column_type=True)
         
-    def test_atomSiteToDf_simple_with_filter_argument(self):
-        pass
+    def test_filterAtomSite_simple_on_alanine_residue(self):
+        # Define what the result should look like
+        cif_simple_atom_site_filtered: pd.DataFrame = pd.DataFrame(
+            data=[['ATOM', np.uint32(1), 'ALA', 'CA', np.float16(0.5), np.float16(0.5), np.float16(0.5)]],
+            columns = ['_atom_site.group_PDB', '_atom_site.id', '_atom_site.label_comp_id', '_atom_site.label_atom_id', '_atom_site.Cartn_x', '_atom_site.Cartn_y', '_atom_site.Cartn_z'])
+
+        # Do the test:
+        pd.testing.assert_frame_equal(cif_simple_atom_site_filtered, self.cif_simple.filterAtomSite(residue_names=['ALA'], atom_names=['CA']), check_dtype=True, check_column_type=True)
+    
 
     
 class TestPdbCifFileCollection(unittest.TestCase):

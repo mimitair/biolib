@@ -36,7 +36,7 @@ class PDB:
 
 
     @staticmethod
-    def downloadCIFFromAccessions(accessions: list, out_dir: Path) -> None:
+    def downloadCifFromAccessions(accessions: list, out_dir: Path) -> None:
         """
         Downloads the given list of PDB accessions in out_dir
         """

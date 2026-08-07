@@ -1,0 +1,32 @@
+#! /usr/bin/env python3
+"""
+Download full PDBx/mmCIF files given a list of PDB entries in a text file with one entry per line
+Usage:
+download_cif_accession_list <path_to_cif_accessions_file> <path_to_out_dir>
+"""
+import sys
+from pathlib import Path
+from biolib.databases.pdb import PDB
+
+def main():
+    # Define the path to input file containing pdb accessions on every new line as the first command line argument
+    path_to_pdb_accessions: Path = Path(sys.argv[1])
+    
+    # Define the path where the cif files should be downloaded:
+    path_to_out_dir: Path = Path(sys.argv[2])
+
+    # Parse the input file into a list:
+    accessions: list = []
+    with path_to_pdb_accessions.open('r') as f:
+        for line in f:
+            accessions.append(line.rstrip())
+    
+    # Call the download function
+    print(f"Parsed {len(accessions)} PDB IDs from {path_to_pdb_accessions.name}.")
+    print("Downloading starts...")
+    PDB.downloadCifFromAccessions(accessions, path_to_out_dir)
+    print(f"Downloading finished. Results can be found in {path_to_out_dir}")
+
+    
+if __name__ == "__main__":
+    main()

@@ -2,6 +2,7 @@ from pathlib import Path
 import sys
 import pandas as pd
 import re
+import matplotlib.pyplot as plt
 
 class FastaFile:
     """
@@ -101,6 +102,65 @@ class FastaFile:
         
         return None
 
+    @staticmethod
+    def csvToFasta(in_file: Path, out_file: Path) -> int:
+        """
+        Converts a csv file with 'id' and 'aa_seq' columns to a fasta file
+
+        Input:
+           - in_file: Path: Input CSV file
+           - out_file: Path: Output FASTA file
+        """
+        df: pd.DataFrame = pd.read_csv(in_file)
+
+        d: dict = df.set_index('id')['aa_seq'].to_dict()
+        
+        with out_file.open("w") as f:
+            for key, value in d.items():
+                f.write(">" + str(key) + "\n" + str(value) + "\n")
+
+        return 0
+
+    def splitToSeparateFiles(self, out_dir: Path) -> int:
+        # Make the output dir if it does not exist
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        # Convert fasta to dict:
+        d: dict = self.toDict()
+
+        # Loop over dict items:
+        for header,sequence in d.items():
+            header = str(header)
+            file_name: str = header + '.fasta'
+            out_file: Path = out_dir / file_name
+            with out_file.open("w") as f:
+                f.write(">" + header + "\n" + str(sequence))
+
+        return 0
+        
+    def filterLengths(self, min_length: int, max_length: int, out_file: Path):
+        """
+        Filters out all sequences below min_length or above max_length.
+        Writes cleaned fasta file to out_file
+        """
+        
+        result: dict = {}
+
+        count: int = 0
+        for header,sequence in self.toDict().items():
+            if len(sequence) < min_length or len(sequence) > max_length:
+                count += 1
+            else:
+                result[header] = sequence
+
+        print(f"Removed {count} sequences according to length thresholds. Writing filtered fasta file to {out_file}")
+
+        with out_file.open("w") as f:
+            for header, seq in result.items():
+                f.write(">" + str(header) + "\n" + str(seq) + "\n")
+        
+        return result
+                
     def matchPattern(self, pattern: str) -> list[(str, int, int, str)]:
         """
         Returns a list of all entries in this fasta file that match the given pattern
@@ -118,6 +178,35 @@ class FastaFile:
                 result.append((header, m.start(), m.end(), m.group()))
 
         return result
-    
+
+    def getLengths(self) -> tuple:
+        result: list = []
+        for sequence in self.toDict().values():
+            result.append(len(sequence))
+
+        return tuple(result)
+            
+        
+    def plotLengthHistogram(self, xlabel: str, ylabel: str, title: str) -> None:
+       data: tuple = self.getLengths()
+
+       fig, ax = plt.subplots()
+
+       ax.hist(data, bins=50)
+
+       plt.show()
+
+       return None
+
+    def plotLengthBox(self):
+        data: tuple = self.getLengths()
+
+        fig, ax = plt.subplots()
+
+        ax.boxplot(data)
+
+        plt.show()
+
+        return None
 
     

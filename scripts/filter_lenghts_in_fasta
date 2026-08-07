@@ -1,0 +1,21 @@
+#! /usr/bin/env python3
+
+from biolib.files.fasta import FastaFile
+from pathlib import Path
+import sys
+
+def main():
+    in_file = Path(sys.argv[1])
+    min_length = int(sys.argv[2])
+    max_length = int(sys.argv[3])
+    out_file = Path(sys.argv[4])
+
+    my_fasta: FastaFile = FastaFile(in_file)
+
+    my_fasta.filterLengths(min_length, max_length, out_file)
+
+if __name__ == "__main__":
+    main()
+
+    
+    
