@@ -1,0 +1,45 @@
+#! /usr/bin/env python3
+
+"""
+Script to find three neigbouring residues based on distance thresholds in a cif file.
+"""
+
+from pathlib import Path
+from biolib.files.pdbcif import PdbCifFile
+import sys
+import itertools
+RES1_NAMES = "SER"#, "THR", "CYS"
+RES2_NAMES = "HIS"#, "LYS"
+RES3_NAMES = "ASP"#, "GLU"
+ATOM1_NAME: str = "CA"
+ATOM2_NAME: str = "CA"
+ATOM3_NAME: str = "CA"
+MAX_DIST1_2: float = 8.5
+MAX_DIST2_3: float = 5.1
+MAX_DIST3_1: float = 10.5
+
+def main():
+    # Read the arguments:
+    in_file: Path = Path(sys.argv[1])
+    #out_file: Path = Path(sys.argv[2])
+
+    # Convert input file to Cif object:
+    cif: PdbCifFile = PdbCifFile(in_file)
+
+    result = cif.findTriads(RES1_NAMES, RES2_NAMES, RES3_NAMES, MAX_DIST1_2, MAX_DIST2_3, MAX_DIST3_1)
+
+    for a in result:
+        print((a.res_name, a.res_id, a.chain_id))
+    """
+    result: list = []
+    # Iterate over every combination of triads:
+    for triad in itertools.product(RES1_NAMES, RES2_NAMES, RES3_NAMES):
+        result.extend(cif.findTriads(triad[0], triad[1], triad[2], MAX_DIST1_2, MAX_DIST2_3, MAX_DIST3_1))
+
+    for triad in result:
+        print((triad.res_name, triad.res_id))
+    """
+    return 0
+    
+if __name__ == "__main__":
+    main()

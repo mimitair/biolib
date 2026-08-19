@@ -1,19 +1,18 @@
 # Default library imports:
-import sys
 import re
 from pathlib import Path
-import logging
 import itertools
 import warnings
 
 # External libraries:
 import pandas as pd
-from parsnip import CifFile
 import numpy as np
 import matplotlib.pyplot as plt
 import biotite.structure.io.pdbx as pdbxio
 import biotite.structure.io as strucio
 import biotite.structure as struc
+from biotite import DeserializationError
+import networkx as nx
 
 # Imports from this project:
 from biolib.util import util
@@ -22,46 +21,49 @@ class PdbCifFile:
     """
     This class represents a PDBx/mmCIF file as described in https://mmcif.wwpdb.org/, and contains methods to parse and manipulate them.
     """
-    def __init__(self, path_to_pdbcif: Path) -> None:
+    def __init__(self, path_to_pdbcif: str) -> None:
         """
         Initializes the PdbCifFFile object.
         
         Input:
-            - path_to_pdbcif: Path: Path object to the cif file.
+           - path_to_pdbcif: Path: path to the cif file.
 
         Returns:
-            - None
+           - None
         """
-        
         ### DEFENSIVE CHECKS ###
-        if not isinstance(path_to_pdbcif, Path):
-            raise TypeError("Path to PDB/mmCIF file must be a Path object. Convert it to a Path object before initiating the class.")
+        path: Path = Path(path_to_pdbcif)
         
-        if not path_to_pdbcif.exists():
-            raise FileNotFoundError(f"{path_to_pdbcif} does not exist. Check if you have provided the correct file path.")
+        if not path.exists():
+            raise FileNotFoundError(f"{path} does not exist. Check if you have provided the correct file path.")
             
-        if not path_to_pdbcif.is_file():
-            raise FileNotFoundError(f"{path_to_pdbcif} is not a file. Check if you have provided a file path instead of a directory.")
+        if not path.is_file():
+            raise FileNotFoundError(f"{path} is not a file. Check if you have provided a file path instead of a directory.")
 
-        if not path_to_pdbcif.suffix == '.cif':
-            raise ValueError(f"{path_to_pdbcif} is not a .cif file. This class only accepts .cif files.")
-        
         ### INIT ###
-        self.full_path: Path = path_to_pdbcif.resolve()  # Resolved path to the CIF file
-        self.name: str = path_to_pdbcif.stem  # Name of the file without suffix and prefix
+        self.full_path: Path = path.resolve()  # Resolved path to the CIF file
+        self.name: str = path.stem  # Name of the file without suffix and prefix
 
     
-    def getAccession(self) -> str:
+    def getPDBAccession(self) -> str:
         """Returns the PDB accession of this cif file based on the _entry.id column
+        TODO: What if the _entry.id column is not there? What does biotite do? (e.g., predicted structures)
         """
         return self.toBiotiteCifFile().block['entry']['id'].as_item()
 
+    def getUniprotAccession(self) -> str:
+        """
+        NOT YET IMPLEMENTED
+        Returns the Uniprot ID that maps to the PDB ID found in the file based on Uniprot mapping service.
+        TODO: what if no PDB ID found?
+        """
+        pass
+    
     def countDataBlocks(self) -> int:
         """ Returns the total amount of data blocks in this cif file.
         """
         return self.full_path.read_text().count('#') -1
 
-    
     def countLoopBlocks(self) -> int:
         """Returns the amount of loop data blocks in this cif file.
         """
@@ -69,13 +71,14 @@ class PdbCifFile:
 
     
     def categoryExists(self, category: str) -> bool:
-        """Returns true if the given category exists in the cif file based on regex matches. Works only for non-loop data blocks.
+        """Returns true if the given category exists in the cif file based on regex matches.
+        Works only for non-loop data blocks.
 
         Input:
-            - category: str: the desired category to extract.
+           - category: str: the desired category to extract.
 
         Returns:
-            - bool: True if the given category exists, False if not.
+           - bool: True if the given category exists, False if not.
         """
         # Extract file contents:
         file_contents: str = self.full_path.read_text()  # Content of the file as a string.
@@ -93,10 +96,10 @@ class PdbCifFile:
         Returns True if the given loop data block exists in the cif file based on regex matches.
 
         Input:
-            - category: str: The loop category to parse
+           - category: str: The loop category to parse
 
         Returns
-            - bool: True if the given category exists, False if not.
+           - bool: True if the given category exists, False if not.
         """
         file_contents: str = self.full_path.read_text()  # Content of the file as a string.
         
@@ -108,60 +111,35 @@ class PdbCifFile:
         return True if m is not None else False
 
     def toBiotiteCifFile(self) -> pdbxio.CIFFile:
+        """Converts this cif file to a biotite CifFile object
+
+        Returns:
+           - pdbxio.CIFFile: this cif file as a biotite CIFFile object
+        """
         return pdbxio.CIFFile.read(self.full_path)
 
-    def toBiotiteAtomArray(self):
-        return strucio.load_structure(self.full_path)
+    def toBiotiteAtomArray(self) -> struc.AtomArray:
+        """Convert the _atom_site data block to a biotite AtomArray object.
+        The first model is chosen by default.
+        The atom_id and charge annotoation categories are added by default.
 
-    @classmethod
-    def biotiteAtomArrayToDf(atom_array: struc.AtomArray) -> pd.DataFrame:
-        pass
-    
-    @classmethod
-    def filterAtomArrayResidues(atom_array: struc.AtomArray, res_names: list) -> struc.AtomArray:
-        """Filter a given atom array based on residue names.
+        Returns:
+           - struc.AtomArray: atom_site data as a biotite AtomArray object
         """
-        mask = np.isin(atom_array.res_name, res_names)
-        return atom_array[mask]
+        atom_array: struc.AtomArray = strucio.load_structure(self.full_path, model=1, extra_fields=['atom_id', 'charge'])
+        return atom_array
 
-    @classmethod
-    def filterAtomArrayAtoms(atom_array: struc.AtomArray, atom_names: list) -> struc.AtomArray:
-        """ Filter a given atom array based on atom names.
-        """
-        mask = np.isin(atom_array.atom_name, atom_names)
-        return atom_array[mask]
-    
     def getChainCount(self) -> int:
+        """Get the amount of chains in this cif file.
+        """
         return struc.get_chain_count(self.toBiotiteAtomArray())
 
     def getModelCount(self) -> int:
+        """Get the amount of models in this cif file.
+        """
         return pdbxio.get_model_count(self.toBiotiteCifFile())
         
-    def categoryToDf(self, category: str) -> pd.DataFrame | dict: 
-        """
-        Convert any data block, given its category name, to a pandas dataframe or dictionary.
-        This function uses the parnsip external library.
-
-        Input:
-            - category: str: The category to extract (f.e.: "atom_site")
-
-        Returns:
-            - pd.DataFrame: A loop data block as a dataframe. Beware that no further processing is done. Every value is essentially a string.
-            - dict: A non-loop data block as a dict.
-
-        Raises:
-            - ValueError: If the given category cannot be found in the cif file.
-        """
-        if self.categoryExists(category):
-            return {key:value for key,value in self.toParsnip().pairs.items() if category + '.' in key}
-        
-        elif self.loopCategoryExists(category):
-            return pd.DataFrame([arr for arr in self.toParsnip().loops if category + '.' in arr.dtype.names[0]][0].reshape(-1))
-
-        else:
-            raise ValueError(f'{category} does not exist in {self.name}')
-
-    def categoryToDf2(self, category: str) -> pd.DataFrame():
+    def categoryToDf(self, category: str) -> pd.DataFrame():
         """Convert a given data block to a pandas dataframe.
         NEEDS TESTING
         """
@@ -174,332 +152,137 @@ class PdbCifFile:
         
         return pd.DataFrame(data=data)
 
-    def findAtomPairsWithinDistance(self,
-                                    res_name1: str,
-                                    res_name2: str,
-                                    atom_name1: str,
-                                    atom_name2: str,
-                                    max_dist: float) -> list:
-        """
-        Find all atom pairs of two different residues based on a maximum distance threshold.
+    @staticmethod
+    def findAtomPairs(atom_array: struc.AtomArray,
+                      pair: tuple,
+                      max_dist: float) -> struc.AtomArrayStack:
+        """Find all atom pairs of two distinct residues based on a maximum distance threshold.
         For example; I want to find all serine-histidine pairs where the CA atoms are within 8.5A of each other.
         Note this only works when the two residues are non-identical. This will not work where res1_name == res2_name
+        Neigbouring residues are omitted.
         NEEDS TESTING
         
         Input:
+           - pair: tuple: Pair of atoms to search in the following format: ('res_name1@atom_name1', 'res_name2@atom_name2')
+           - max_dist: float: The maximum distcance (in angstroms) between the first and second atom.
+           
+        Returns:
+           list[struc.AtomArray]: A list of biotite AtomArray objects. Each AtomArray consists of two Atom objects comprising a pair within the given distance threshold.
+        """
+        # Inititate result list:
+        result: list = []
+
+        # Extract residue names and atom names from pair input:
+        res_name1: str = pair[0].split('@')[0]
+        atom_name1: str = pair[0].split('@')[1]
+        res_name2: str = pair[1].split('@')[0]
+        atom_name2: str = pair[1].split('@')[1]
+
+        # Only consider the amino acids (no hetero atoms):
+        atom_array = atom_array[struc.filter_amino_acids(atom_array)]
+        
+        # Consider each chain idnividually:
+        for chain in struc.chain_iter(atom_array):
+            # Filter based on res names and atom names, hetero atoms are discared by default:
+            chain = chain[((chain.res_name==res_name1) & (chain.atom_name==atom_name1)) | ((chain.res_name==res_name2) & (chain.atom_name==atom_name2))]
+
+            # Now get the index of each atom pair within the given distance threshold via cell list object for efficient distance calculations:
+            idx_pairs: np.ndarray = struc.CellList(chain, cell_size=max_dist).get_atoms(chain.coord, radius=max_dist, result_format=struc.CellList.Result.PAIRS)
+
+            # Omit the index pairs along the diagonal of the 'distance matrix':
+            # Also filter out redundant pairs such as [[a,b][b,a]] by sorting and uniqueing along the appropriate axes
+            idx_pairs_filtered: np.ndarray = np.unique(np.sort(idx_pairs[idx_pairs[:,0]!=idx_pairs[:,1]], axis=1), axis=0)
+
+            # append atom array to result list if the residue names of the pairs are not identical and, not next to each other and in the same chain
+            result.extend([struc.array([chain[i], chain[j]]) for i,j in idx_pairs_filtered if chain[i].res_name != chain[j].res_name and abs(chain[i].res_id - chain[j].res_id) != 1])
+
+        # Return list of atom arrays:
+        return result
+    
+    @staticmethod
+    def findTriads(atom_array: struc.AtomArray,
+                   pair1: tuple,
+                   pair2: tuple,
+                   pair3: tuple,
+                   max_dist_pair1: float,
+                   max_dist_pair2: float,
+                   max_dist_pair3: float) -> list[struc.AtomArray]:
+        """Find atoms of three distinct residues within a given distance of each other.
+      
+        Input:
            -
+
         Returns:
-           list: A list of biotite AtomArray objects. Each AtomArray consists of two Atom objects comprising a pair within the given distance threshold.
+           - list[struc.AtomArray]: list of biotite AtomArray objects. Each AtomArray contains Three Atom objects that fulfill the distance thresholds.
         """
-        # Convert to atom array:
+        # Initiate result list:
+        result: list = []
+
+        # Extract the atom names to filter later on:
+        atom_names: list = [pair.split('@')[1] for pair in pair1+pair2+pair3]
+        
+        # Consider each chain individually:
+        for chain in struc.chain_iter(atom_array):
+            # Initiate graph:
+            g: nx.Graph = nx.Graph()
+            
+            # Add the residue ID of each atom pair as an edge. F.e. 126-167 167-189 
+            g.add_edges_from([chain.res_id for chain in PdbCifFile.findAtomPairs(chain, pair1, max_dist_pair1) + PdbCifFile.findAtomPairs(chain, pair2, max_dist_pair2) + PdbCifFile.findAtomPairs(chain, pair3,  max_dist_pair3)])
+
+            # Now we have to couple each residue back to its Atom object based on the res_id.
+            # Then use networkx all_triangles() function to find edges that form a triangle. This returns an iterator where each element contains the residue IDs of a triad.
+            # We're using res_id instead of atom_id to allow two atoms in the same residue to complete the triangle (f.e.: two nitrogens in HIS)
+            # Also only return the atoms that were specified in the input (otherwise all atoms of the residues are returned)
+            result.extend([chain[(np.isin(chain.res_id, triad)) & (np.isin(chain.atom_name, atom_names))] for triad in nx.all_triangles(g)])
+
+            # Clear the graph for the next chain:
+            g.clear()
+
+        # Return result as a list of atom arrays:
+        return result
+
+    @staticmethod
+    def applySasaToBiotiteAtomArray(atom_array: struc.AtomArray) -> struc.AtomArray:
+        atom_array.set_annotation('sasa', struc.sasa(atom_array))
+        return atom_array
+    
+    def isMutant(self) -> bool:
+        """Check if this cif file has mutated residues based on the _entity.pdbx_mutation column.
+
+        Returns:
+           - bool: True if any value besides '?' or '.' is encountered in the pdbx_mutation column 
+        """
+        try:
+            column: pdbx.CifColumn = self.toBiotiteCifFile().block['entity']['pdbx_mutation']
+            for value in self.toBiotiteCifFile().block['entity']['pdbx_mutation'].as_array():
+                if value != '?' and value != '.':
+                    return True
+            return False
+     
+        except DeserializationError as e:
+            print(self.name, e)
+            return False
+        
+    def getHetero(self, omit_water: bool=True) -> np.ndarray:
+        """Returns the residue names of all hetero atoms
+        """
         atom_array: struc.AtomArray = self.toBiotiteAtomArray()
-
-        # Filter based on res names and atom names, hetero atoms are discared by default:
-        atom_array = atom_array[((atom_array.res_name==res_name1) & (atom_array.atom_name==atom_name1)) | ((atom_array.res_name==res_name2) & (atom_array.atom_name==atom_name2)) & atom_array.hetero==False]
-
-        # Now get the index of each atom pair within the given distance threshold via cell list object for efficient distance calculations:
-        idx_pairs: np.ndarray = struc.CellList(atom_array, cell_size=max_dist).get_atoms(atom_array.coord, radius=max_dist, result_format=struc.CellList.Result.PAIRS)
-
-        # Omit the index pairs along the diagonal of the 'distance matrix':
-        # Also filter out redundant pairs such as [[a,b][b,a]] by sorting and uniqueing along the appropriate axes
-        idx_pairs_filtered: np.ndarray = np.unique(np.sort(idx_pairs[idx_pairs[:,0]!=idx_pairs[:,1]], axis=1), axis=0)
-
-        # Return as a list of atom arrays if the residue names of the pairs are not identical:
-        return [struc.array([atom_array[i], atom_array[j]]) for i,j in idx_pairs if atom_array[i].res_name != atom_array[j].res_name]
-
-    def findTriads3(self,
-                    res_name1: str,
-                    res_name2: str,
-                    res_name3: str,
-                    max_dist1_2: float,
-                    max_dist2_3: float,
-                    max_dist3_1: float,
-                    atom_name1: str = "CA",
-                    atom_name2: str = "CA",
-                    atom_name3: str = "CA") -> list:
-
-        # Get the residue IDs for all pairs first
-        pairs1_2: list = [atom_array.res_id for atom_array in self.getAtomPairsWithinDistance(res_name1, res_name2, atom_name1, atom_name2, max_dist1_2)]
-        pairs2_3: list = [atom_array.res_id for atom_array in self.getAtomPairsWithinDistance(res_name2, res_name3, atom_name2, atom_name3, max_dist2_3)]
-        pairs3_1: list = [atom_array.res_id for atom_array in self.getAtomPairsWithinDistance(res_name3, res_name1, atom_name3, atom_name1, max_dist3_1)]
-
-        # convert to numpy array:
-        a = np.array([pairs1_2, pairs2_3, pairs3_1])
-        
-        result: list = []
-        
-        # Now filter those that actually make a triad
-        for atom_array in pairs_1_2:
-            
-            
-
-        
-    def findTriads(self,
-                   res1_name: str,
-                   res2_name: str,
-                   res3_name: str,
-                   max_distance1_2: float,
-                   max_distance2_3: float,
-                   atom1_name: str = "CA",
-                   atom2_name: str = "CA",
-                   atom3_name: str = "CA") -> list:
-        """Detect a triad of residues based on distance threshold between their atoms.
-        Needs testing
-        """
-        # First we need the current cif file as an AtomArray object:
-        atom_array: AtomArray = self.toBiotiteAtomArray()
-        
-        # Then we extract the atoms for each residue:
-        res1_atoms: AtomArray = atom_array[(atom_array.res_name==res1_name) & (atom_array.atom_name==atom1_name)]
-        res2_atoms: AtomArray = atom_array[(atom_array.res_name==res2_name) & (atom_array.atom_name==atom2_name)]
-        res3_atoms: AtomArray = atom_array[(atom_array.res_name==res3_name) & (atom_array.atom_name==atom3_name)]
-
-        result: list = []
-        # Handle each chain independently:
-        for chain in np.unique(atom_array.chain_id):
-            chain_res1_atoms = res1_atoms[res1_atoms.chain_id==chain]
-            chain_res2_atoms = res2_atoms[res2_atoms.chain_id==chain]
-            chain_res3_atoms = res3_atoms[res3_atoms.chain_id==chain]
-
-            # Then we define two lists that keep track of the atoms that pass the distance threshold:
-            distance1_2_pass: list = []
-            distance2_3_pass: list = []
-
-            # Now we loop over the atoms of res1 and res2:
-            for atom1 in chain_res1_atoms:
-                for atom2 in chain_res2_atoms:
-                    # Set distance threshold and omit neighboring residues.
-                    if struc.distance(atom1, atom2) < max_distance1_2 and abs(atom1.res_id - atom2.res_id) != 1:
-                        distance1_2_pass.append((atom1, atom2))
-
-            # Now we loop over the atoms of res2 that passed the distance threhsold with res1:
-            for _,atom2 in distance1_2_pass:
-                for atom3 in chain_res3_atoms:
-                    if struc.distance(atom2, atom3) < max_distance2_3 and abs(atom2.res_id - atom3.res_id) != 1:
-                        distance2_3_pass.append((atom2, atom3))
-
-            # Now we complete the threesome. If atom2 passes both distance thresholds, it completes the triad:
-            for atom1,atom2a in distance1_2_pass:
-                for atom2b,atom3 in distance2_3_pass:
-                    if atom2a.res_id == atom2b.res_id:
-                        result.append(struc.array([atom1, atom2a, atom3]))
-
-        # Return the result as a list of biotite atom arrays:
-        return result
-                                
-    def getHeteroAtoms(self) -> set:
-        """
-        Returns a set of hetero atoms (labeled as 'HETATM') in the _atom_site category.
-
-        Returns:
-            - set: A set of HETATM names in this PDBx/mmCIF file. Empty set if nothing is found
-
-        """
-        # Convert the atom_site category to a dataframe:
-        df_atoms = self.loopCategoryToDf('atom_site')
-
-        # Return the 'label_comp_id' column for each row where 'group_PDB' == 'HETATM' as a set
-        return set(df_atoms[df_atoms['group_PDB'] == 'HETATM']['label_comp_id'].to_list())
-
-    def toParsnip(self):
-        with warnings.catch_warnings():
-            warnings.filterwarnings("error")
-            try:
-                return CifFile(self.full_path)
-        
-            except Warning as w:
-                warnings.filterwarnings("ignore")
-                #print(f"Warning in {self.name}")
-                return CifFile(self.full_path)
-
-    
-    def getAminoAcidSequences(self) -> list:
-        """
-        Returns the amino acid sequences of each polymer entity in this file as a list of strings.
-        If the cif file has only one polymer entity, a list of length 1 is returned.
-
-        Returns:
-            - list: A list of the amino acid sequences for each polymer entity in this PDBx/mmCIF file. Empty list if no polypeptide sequences were found
-        """
-        # Extract the data block where we can find the amino acid sequences:
-        df: pd.DataFrame | dict = self.categoryToDf('_entity_poly')
-
-        # TODO checking type every time is too slow?
-        if isinstance(df, pd.DataFrame):
-            # Extract only the rows where _entity.type == 'polypeptide' 
-            df = df.loc[(df['_entity_poly.type'] == "'polypeptide(L)'") | (df['_entity_poly.type'] == "polypeptide(L)") | (df['_entity_poly.type'] == "'polypeptide(D)'") | (df['_entity_poly.type'] == "polypeptide(D)")]
-            return [seq.replace('\n', '').replace(';', '') for seq in df['_entity_poly.pdbx_seq_one_letter_code'].tolist()]
-
-        elif isinstance(df, dict):
-            if (df['_entity_poly.type'] == "'polypeptide(L)'") or (df['_entity_poly.type'] == "polypeptide(L)") or (df['_entity_poly.type'] == "polypeptide(D)") or (df['_entity_poly.type'] == "'polypeptide(D)'"):
-                return [df['_entity_poly.pdbx_seq_one_letter_code'].replace('\n', '').replace(';', '')]
-            else:
-                return []
-
-    def countEntities(self) -> int:
-        """
-        Returns the amount of entities in this cif file.
-        """
-        return len(self.toParsnip()['_entity.id'])
-
-    def countPolymerEntities(self) -> int:
-        """
-        Counts the amount of entities labeled as 'polymer' in this cif file.
-        """
-        return len([entity for entity in np.nditer(self.toParsnip()['_entity.type']) if entity == 'polymer'])
-
-    def countPolypeptideEntities(self) -> int:
-        """ Counts the amount of polymer entities labeled as 'polypeptide(L)' or 'polypeptide(D)'
-
-        Returns:
-           - int: Amount of polypetide entities in this cif file.
-        """
-        
-        if self.categoryExists('_entity_poly'):
-            df: dict = self.categoryToDf('_entity_poly')
-            assert isinstance(df, dict)
-            if df['_entity_poly.type'] == "'polypeptide(D)'" or df['_entity_poly.type'] == "'polypeptide(L)'" or df['_entity_poly.type'] == "polypeptide(D)" or df['_entity_poly.type'] == "polypeptide(L)":
-                return 1
-            else:
-                return 0
-
-        elif self.loopCategoryExists('_entity_poly'):
-            df: pd.DataFrame = self.categoryToDf('_entity_poly')
-            assert isinstance(df, pd.DataFrame)
-            df = df.loc[(df['_entity_poly.type'] == "polypeptide(D)") | (df['_entity_poly.type'] == "polypeptide(L)") | (df['_entity_poly.type'] == "'polypeptide(D)'") | (df['_entity_poly.type'] == "'polypeptide(L)'")]
-            return len(df)
-
+        hetero: struc.AtomArray = atom_array[atom_array.hetero==True]
+        if omit_water:
+            return np.unique(hetero[hetero.res_name!='HOH'].res_name)
         else:
-            print('_entity_poly does not exist')
-            return 0
-                        
-    def atomSiteToDf(self, filter: dict=None) -> pd.DataFrame:
-        """ Returns the _atom_site loop block as a dataframe.
-        This method is preferred over categoryToDf(), since the columns are converted to appropriate dtypes for memory efficiency.
-        Additionally, a filter can be applied to select only the desired rows.
-        TODO: check if all necessary columns are present
+            return np.unique(hetero.res_name)
 
-        Input:
-           -filter: dict: Keys are column names, values are lists of values allowed for that columns (e.g., {'_atom_site.group_PDB': 'ATOM'})
 
-        Returns:
-           -pd.DataFrame: The _atom_site loop block as a dataframe. Possibly with some rows omitted due to the filter argument
-        """
-
-        # Get the atom site dataframe:
-        df = self.categoryToDf('_atom_site')
-
-        # Dictionary that maps column names to desired dtypes:
-        dtype_mapping: dict = {"_atom_site.id": "uint32",
-                               "_atom_site.Cartn_x": "float16",
-                               "_atom_site.Cartn_y": "float16",
-                               "_atom_site.Cartn_z": "float16",
-                               "_atom_site.pdbx_PDB_model_num": "uint16",
-                               "_atom_site.auth_seq_id": "uint16",
-                               "_atom_site.label_seq_id": "uint16",
-                               "_atom_site.label_entity_id": "uint16"}
-
-            
-        # Return with adapted typing:
-        return util.safeCastColumns(df, dtype_mapping)
-
-        
-    ##################################################
-    ##### EVERYTHING UNDERNEATH IS NOT FUNCTIONAL ####
-    ##################################################
-
-    def filterAtomSite(self, residue_names: list, atom_names: list) -> pd.DataFrame:
-        """
-        Filter the atom site loop block based on residue names and atom names.
-        Only those passed to the function will be retained and returned as a dataframe.
-        TODO: handle empty lists (retain everything)
-        """
-        df = self.atomSiteToDf()
-
-        return df.loc[(df['_atom_site.label_comp_id'].isin(residue_names)) & (df['_atom_site.label_atom_id'].isin(atom_names))]
-
-    
-    def residueNumberToResidueName(self, residue_number: int) -> str:
-        """
-        Input:
-            - residue_number: Number of an amino acid residue in the PDB/mmCIF file.
-            
-        Returns:
-            - str: The name of the residue as a string.
-        """
-        return self.df_atoms.loc[self.df_atoms['label_seq_id'] == str(residue_number)]['label_comp_id'].iloc[0]
-    
-    
-    def residueAtomNamesToPoints(self, residue_name: str, atom_name: str) -> dict:
-        """
-        Input:
-            - residue_name: Name of an amino acid residue (fe 'GLY').
-            - atom_name: Name of the atom as it is represented in the PDB/mmCIF file (fe 'CA').
-        
-        Returns:
-            - dict: A dictionary with residue numbers as keys and the atom, represented as a Point object, as values.
-        """
-        # Empty dict to store results:
+    @staticmethod
+    def atomArrayToDf(atom_array: struc.AtomArray) -> pd.DataFrame:
         result: dict = {}
-        
-        # Extract the rows where atom and residue equal that of what is given:
-        df = self.df_atoms.loc[(self.df_atoms['label_comp_id'] == residue_name) & (self.df_atoms['label_atom_id'] == atom_name)]
+        columns: list = atom_array.get_annotation_categories()
+        for annotation in columns:
+            result[annotation] = atom_array.get_annotation(annotation)
+        return pd.DataFrame.from_dict(result)
 
-        # Convert the xyz coordinates of every row to a Point object, and store in a dictionary with the residue number as key:
-        # Iterate over rows as named tuples:
-        # We can access the column name through 'row.<column_name>'
-        # row.label_seq_id is the residue number in string format, so we typecast to int.
-        for row in df.itertuples():
-            result[int(row.label_seq_id)] = self.atomNumberToPoint(int(row.Index))        
-        
-        return result
     
-    
-    def atomNumberToSeries(self, atom_number: int) -> pd.Series:
-        """
-        Input:
-            - atom_number: The number of the atom in the PDB/mmCIF file.
-            
-        Returns:
-            - pd.Series: The atom as a pandas Series.
-        """
-        return self.df_atoms.loc[[str(atom_number)]]
-    
-    
-    def atomNumberToPoint(self, atom_number: int) -> 'Point':
-        """
-        Input:
-            - atom_number: The number of the atom in the PDB/mmCIF file ('id' column).
-            
-        Returns:
-            - Point: The atom as a Point object with x,y,z coordinates.
-        """
-        atom = self.df_atoms.loc[[str(atom_number)]]
-        x = float(atom['Cartn_x'].iloc[0])
-        y = float(atom['Cartn_y'].iloc[0])
-        z = float(atom['Cartn_z'].iloc[0])
-        
-        return point.Point(x,y,z)
-    
-    
-    def atomNumberToResidueNumber(self, atom_number: int) -> int:
-        """
-        Input: 
-            - atom_number: Number of the atom in the PDB/mmCIF file ('id' column).
-        
-        Returns:
-            - int: The residue number of which this atom is part.
-        
-        """
-        return int(self.df_atoms.loc[[str(atom_number)]]['label_seq_id'].iloc[0])
-        
-                    
-    def alignTo(self, other: 'PDBCIFFile'):
-        pass
-    
-    def plot2DStructure(self):
-        pass
-
 class PdbCifFileCollection():
     """
     Class that represents a collection of PDBx/mmCIF files and methods to manipulate them.
@@ -530,7 +313,7 @@ class PdbCifFileCollection():
         return None
     
     @property
-    def count(self):
+    def size(self):
         """Returns the amount of cif files in this collection.
         """
         return len(self.pdbcif_files)
@@ -579,12 +362,12 @@ class PdbCifFileCollection():
         return tuple(result)
     
     def getChainCounts(self) -> tuple:
-        result: list = []
+        result: dict = {}
 
         for pdbcif_file in self.pdbcif_files:
-            result.append(pdbcif_file.getChainCount())
+            result[pdbcif_file.name] = pdbcif_file.getChainCount()
 
-        return tuple(result)
+        return result
     
     def getPolypeptideCounts(self) -> tuple:
         result: list = []
@@ -640,12 +423,42 @@ class PdbCifFileCollection():
         df: pd.DataFrame = pd.DataFrame.from_dict(data)
         return df
 
-    def getAuthors(self):
-        pass
-    
-    def getNumberOfMutants(self):
-        pass
+    def findTriads(self,
+                   pair1: tuple,
+                   pair2: tuple,
+                   pair3: tuple,
+                   max_dist_pair1,
+                   max_dist_pair2,
+                   max_dist_pair3) -> pd.DataFrame:
+        """Detect triads in a cif file collection.
+        Returns a dataframe where each row represents a detected triad.
+        """
+        # Initiate empty dataframe to store results
+        result: pd.DataFrame = pd.DataFrame()
+        
+        # Start triad count at 1
+        count = 1
+        
+        # Loop over each file 
+        for cif_file in self.pdbcif_files:
+            # Loop over every triad found in the file
+            for triad in PdbCifFile.findTriads(cif_file.toBiotiteAtomArray(), pair1, pair2, pair3, max_dist_pair1, max_dist_pair2, max_dist_pair3):
+                df: pd.DataFrame = PdbCifFile.atomArrayToDf(triad)
+                # Add additional columns to track file name and triad id:
+                df['file_name'] = cif_file.name
+                df['triad_id'] = count
+                count += 1 # increment
+                # Concatenate to df:
+                result = pd.concat([df, result], ignore_index=True)
 
+        return result
+             
+    
+    def getMutants(self):
+        """Returns the file names of cif files with mutated residues.
+        """
+        return [cif_file.name for cif_file in self.pdbcif_files if cif_file.isMutant()]
+        
     def getNumberOfLigandBound(self):
         pass
 

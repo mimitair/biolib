@@ -1,0 +1,36 @@
+#! /usr/bin/env python3
+
+import sys
+from pathlib import Path
+import itertools
+import pandas as pd
+from biolib.files.pdbcif import PdbCifFileCollection
+
+RES_NAMES1: tuple = "SER", "THR", "CYS"
+RES_NAMES2: tuple = "HIS", "LYS"
+RES_NAMES3: tuple = "ASP", "GLU"
+MAX_DIST1_2: float = 8.5
+MAX_DIST2_3: float = 5.1
+MAX_DIST3_1: float = 10.5
+
+def main():
+    in_dir: Path = Path(sys.argv[1])
+    out_file: Path = Path(sys.argv[2])
+
+    df: pd.DataFrame = pd.DataFrame()
+    # Convert in_dir to collection object:
+    mycoll: PdbCifFileCollection = PdbCifFileCollection(in_dir)
+    print(f"Detected {mycoll.count} .cif files in {mycoll.full_path}")
+    for triad in itertools.product(RES_NAMES1, RES_NAMES2, RES_NAMES3):
+        print(f"Looking for {triad}...")
+        result = mycoll.findTriads(triad[0], triad[1], triad[2], MAX_DIST1_2, MAX_DIST2_3, MAX_DIST3_1)
+        print(f"   {len(result)} triad(s) found")
+        df = pd.concat([df, result], ignore_index=True)
+
+    print(f"--- Total triads found: {len(df)} ---")
+    print(f"{df['file_name'].nunique()}/{mycoll.count} .cif files have at least one triad.")
+    df.to_csv(out_file, header=True)
+    return 0
+
+if __name__ == "__main__":
+    main()
