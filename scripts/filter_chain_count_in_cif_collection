@@ -1,0 +1,36 @@
+#!/usr/bin/env python3
+
+"""
+Filter files in a cif file collection based on maximum chain count.
+Creates a new directory with symlinks to the cif files that have less chains than <max_chain_count>
+
+Usage: filter_chain_count_in_cif_collection <in_dir> <out_dir> <max_chain_count>
+"""
+
+import sys
+from pathlib import Path
+import datetime
+from biolib.files.pdbcif import CifFileCollection
+
+def main():
+    in_dir: Path = Path(sys.argv[1]).resolve()
+    out_dir: Path = Path(sys.argv[2]).resolve()
+    max_chain_count: int = int(sys.argv[3])
+
+    mycoll: CifFileCollection = CifFileCollection(in_dir)
+    print(f"Amount of cif files: {mycoll.size}")
+
+    outliers: list = mycoll.filterByChainCount(max_chain_count=max_chain_count, out_dir=out_dir)
+
+    print(f"Amount of cif files exceeding chain count: {len(outliers)}")
+    print(f"Output directory: {out_dir.name}")
+    
+if __name__ == "__main__":
+
+    print(f"--- SCRIPT: {__file__} ---")
+    print(f"--- COMMAND: {' '.join(sys.argv)} ---")
+    print(f"--- START: {datetime.datetime.now()} ---")
+
+    main()
+    
+    print(f"--- END: {datetime.datetime.now()} ---")

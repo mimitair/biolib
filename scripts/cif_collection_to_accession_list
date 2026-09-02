@@ -6,15 +6,15 @@ Usage: cif_collection_to_accession_list <path_to_cif_collection> <path_to_output
 """
 import sys
 from pathlib import Path
-from biolib.files.pdbcif import PdbCifFileCollection
+from biolib.files.pdbcif import CifFileCollection
 
 def main():
     path_to_cif_collection: Path = Path(sys.argv[1])
     path_to_out_file: Path = Path(sys.argv[2])
 
-    cif_collection: PdbCifFileCollection = PdbCifFileCollection(path_to_cif_collection)
+    cif_collection: CifFileCollection = CifFileCollection(path_to_cif_collection)
 
-    cif_collection.writePDBIDsToFile(path_to_out_file)
+    cif_collection.writeIDsToFile(path_to_out_file)
 
 if __name__ == "__main__":
     main()

@@ -43,7 +43,7 @@ class FastaFile:
         Returns the amount of sequences in this fasta file.
         """
         return len(self.toDict())
-    
+
     def toDict(self) -> dict:
         """
         Read this FASTA file and return as a dictionary of {header:sequence}
@@ -66,8 +66,16 @@ class FastaFile:
                 result[sequence_id] += line
             
         return result
-        
 
+    
+    def getHeaders(self) -> list:
+        return list(self.toDict().keys())
+
+    
+    def getSequences(self) -> list:
+        return list(self.toDict().values())
+
+    
     def toDf(self) -> pd.DataFrame:
         """
         Read this FASTA file and return as a dataframe with column 'header' and 'sequence'
@@ -138,12 +146,11 @@ class FastaFile:
 
         return 0
         
-    def filterLengths(self, min_length: int, max_length: int, out_file: Path):
+    def filterByLength(self, min_length: int, max_length: int, out_file: Path = None):
         """
         Filters out all sequences below min_length or above max_length.
         Writes cleaned fasta file to out_file
-        """
-        
+        """        
         result: dict = {}
 
         count: int = 0
@@ -155,9 +162,10 @@ class FastaFile:
 
         print(f"Removed {count} sequences according to length thresholds. Writing filtered fasta file to {out_file}")
 
-        with out_file.open("w") as f:
-            for header, seq in result.items():
-                f.write(">" + str(header) + "\n" + str(seq) + "\n")
+        if out_file is not None:
+            with out_file.open("w") as f:
+                for header, seq in result.items():
+                    f.write(">" + str(header) + "\n" + str(seq) + "\n")
         
         return result
                 
@@ -179,16 +187,12 @@ class FastaFile:
 
         return result
 
-    def getLengths(self) -> tuple:
-        result: list = []
-        for sequence in self.toDict().values():
-            result.append(len(sequence))
+    def getLengths(self) -> list:
+        return [len(sequence) for sequence in self.toDict().values()]
 
-        return tuple(result)
-            
-        
+    
     def plotLengthHistogram(self, xlabel: str, ylabel: str, title: str) -> None:
-       data: tuple = self.getLengths()
+       data: list = self.getLengths()
 
        fig, ax = plt.subplots()
 
@@ -210,3 +214,6 @@ class FastaFile:
         return None
 
     
+class FastaFileCollection:
+    def __init__(self):
+        pass

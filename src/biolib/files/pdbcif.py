@@ -17,13 +17,13 @@ import networkx as nx
 # Imports from this project:
 from biolib.util import util
 
-class PdbCifFile:
+class CifFile:
     """
     This class represents a PDBx/mmCIF file as described in https://mmcif.wwpdb.org/, and contains methods to parse and manipulate them.
     """
     def __init__(self, path_to_pdbcif: str) -> None:
         """
-        Initializes the PdbCifFFile object.
+        Initializes the CifFFile object.
         
         Input:
            - path_to_pdbcif: Path: path to the cif file.
@@ -42,15 +42,20 @@ class PdbCifFile:
 
         ### INIT ###
         self.full_path: Path = path.resolve()  # Resolved path to the CIF file
-        self.name: str = path.stem  # Name of the file without suffix and prefix
+        self.name: str = path.name  # Name of the file without prefix
+        self.stem: str = path.stem  # Name without prefix and suffix
 
     
-    def getPDBAccession(self) -> str:
-        """Returns the PDB accession of this cif file based on the _entry.id column
-        TODO: What if the _entry.id column is not there? What does biotite do? (e.g., predicted structures)
+    def getID(self) -> str:
+        """Returns the value in the _entry.id column
+        If it does not exist, return the the part before the first '_' character of stem of the file name (e.g.; 'abcd' for 'abcd_full_A.cif')
         """
-        return self.toBiotiteCifFile().block['entry']['id'].as_item()
-
+        try:
+            return self.toBiotiteCifFile().block['entry']['id'].as_item().strip().upper()
+        
+        except KeyError as e: # When the 'id' column cannot be found
+            return self.stem.split('_')[0].strip().upper()
+    
     def getUniprotAccession(self) -> str:
         """
         NOT YET IMPLEMENTED
@@ -58,12 +63,14 @@ class PdbCifFile:
         TODO: what if no PDB ID found?
         """
         pass
+
     
     def countDataBlocks(self) -> int:
         """ Returns the total amount of data blocks in this cif file.
         """
         return self.full_path.read_text().count('#') -1
 
+    
     def countLoopBlocks(self) -> int:
         """Returns the amount of loop data blocks in this cif file.
         """
@@ -91,6 +98,7 @@ class PdbCifFile:
 
         return True if m is not None else False
 
+    
     def loopCategoryExists(self, category: str) -> bool:
         """
         Returns True if the given loop data block exists in the cif file based on regex matches.
@@ -110,6 +118,7 @@ class PdbCifFile:
 
         return True if m is not None else False
 
+    
     def toBiotiteCifFile(self) -> pdbxio.CIFFile:
         """Converts this cif file to a biotite CifFile object
 
@@ -117,6 +126,7 @@ class PdbCifFile:
            - pdbxio.CIFFile: this cif file as a biotite CIFFile object
         """
         return pdbxio.CIFFile.read(self.full_path)
+
 
     def toBiotiteAtomArray(self) -> struc.AtomArray:
         """Convert the _atom_site data block to a biotite AtomArray object.
@@ -126,19 +136,33 @@ class PdbCifFile:
         Returns:
            - struc.AtomArray: atom_site data as a biotite AtomArray object
         """
-        atom_array: struc.AtomArray = strucio.load_structure(self.full_path, model=1, extra_fields=['atom_id', 'charge'])
-        return atom_array
+        try:
+            return strucio.load_structure(self.full_path, include_bonds=True, model=1, extra_fields=['atom_id', 'charge'])
+        
+        except KeyError as e:
+            mycif: pdbxio.CIFFile = self.toBiotiteCifFile()
+            mycif.block['atom_site']['pdbx_PDB_model_num'] = np.ones(len(mycif.block['atom_site']['id'].as_array()), dtype=np.int32)
+            return pdbxio.get_structure(mycif, include_bonds=True, model=1, extra_fields=['atom_id', 'charge'])
 
+        
     def getChainCount(self) -> int:
         """Get the amount of chains in this cif file.
         """
         return struc.get_chain_count(self.toBiotiteAtomArray())
 
+    
+    def getUniqueChainCount(self) -> int:
+        """Returns the amount of uniqe chain identifiers in this cif file
+        """
+        return np.unique(struc.get_chains(self.toBiotiteAtomArray())).size
+
+    
     def getModelCount(self) -> int:
         """Get the amount of models in this cif file.
         """
         return pdbxio.get_model_count(self.toBiotiteCifFile())
-        
+
+    
     def categoryToDf(self, category: str) -> pd.DataFrame():
         """Convert a given data block to a pandas dataframe.
         NEEDS TESTING
@@ -152,10 +176,11 @@ class PdbCifFile:
         
         return pd.DataFrame(data=data)
 
+    
     @staticmethod
     def findAtomPairs(atom_array: struc.AtomArray,
                       pair: tuple,
-                      max_dist: float) -> struc.AtomArrayStack:
+                      max_dist: float) -> list[struc.AtomArray]:
         """Find all atom pairs of two distinct residues based on a maximum distance threshold.
         For example; I want to find all serine-histidine pairs where the CA atoms are within 8.5A of each other.
         Note this only works when the two residues are non-identical. This will not work where res1_name == res2_name
@@ -185,19 +210,24 @@ class PdbCifFile:
         for chain in struc.chain_iter(atom_array):
             # Filter based on res names and atom names, hetero atoms are discared by default:
             chain = chain[((chain.res_name==res_name1) & (chain.atom_name==atom_name1)) | ((chain.res_name==res_name2) & (chain.atom_name==atom_name2))]
+            
+            # We could get an empty chain here (none of the residues are present)
+            if len(chain) != 0:
+                # Now get the index of each atom pair within the given distance threshold via cell list object for efficient distance calculations:
+                idx_pairs: np.ndarray = struc.CellList(chain, cell_size=max_dist).get_atoms(chain.coord, radius=max_dist, result_format=struc.CellList.Result.PAIRS)
 
-            # Now get the index of each atom pair within the given distance threshold via cell list object for efficient distance calculations:
-            idx_pairs: np.ndarray = struc.CellList(chain, cell_size=max_dist).get_atoms(chain.coord, radius=max_dist, result_format=struc.CellList.Result.PAIRS)
+                # Omit the index pairs along the diagonal of the 'distance matrix':
+                # Also filter out redundant pairs such as [[a,b][b,a]] by sorting and uniqueing along the appropriate axes
+                idx_pairs_filtered: np.ndarray = np.unique(np.sort(idx_pairs[idx_pairs[:,0]!=idx_pairs[:,1]], axis=1), axis=0)
 
-            # Omit the index pairs along the diagonal of the 'distance matrix':
-            # Also filter out redundant pairs such as [[a,b][b,a]] by sorting and uniqueing along the appropriate axes
-            idx_pairs_filtered: np.ndarray = np.unique(np.sort(idx_pairs[idx_pairs[:,0]!=idx_pairs[:,1]], axis=1), axis=0)
-
-            # append atom array to result list if the residue names of the pairs are not identical and, not next to each other and in the same chain
-            result.extend([struc.array([chain[i], chain[j]]) for i,j in idx_pairs_filtered if chain[i].res_name != chain[j].res_name and abs(chain[i].res_id - chain[j].res_id) != 1])
+                # append atom array to result list if the residue names of the pairs are not identical and, not next to each other and in the same chain
+                result.extend([struc.array([chain[i], chain[j]]) for i,j in idx_pairs_filtered if chain[i].res_name != chain[j].res_name and abs(chain[i].res_id - chain[j].res_id) != 1])
+            else:
+                continue
 
         # Return list of atom arrays:
         return result
+
     
     @staticmethod
     def findTriads(atom_array: struc.AtomArray,
@@ -227,7 +257,7 @@ class PdbCifFile:
             g: nx.Graph = nx.Graph()
             
             # Add the residue ID of each atom pair as an edge. F.e. 126-167 167-189 
-            g.add_edges_from([chain.res_id for chain in PdbCifFile.findAtomPairs(chain, pair1, max_dist_pair1) + PdbCifFile.findAtomPairs(chain, pair2, max_dist_pair2) + PdbCifFile.findAtomPairs(chain, pair3,  max_dist_pair3)])
+            g.add_edges_from([chain.res_id for chain in CifFile.findAtomPairs(chain, pair1, max_dist_pair1) + CifFile.findAtomPairs(chain, pair2, max_dist_pair2) + CifFile.findAtomPairs(chain, pair3,  max_dist_pair3)])
 
             # Now we have to couple each residue back to its Atom object based on the res_id.
             # Then use networkx all_triangles() function to find edges that form a triangle. This returns an iterator where each element contains the residue IDs of a triad.
@@ -241,10 +271,12 @@ class PdbCifFile:
         # Return result as a list of atom arrays:
         return result
 
+    
     @staticmethod
     def applySasaToBiotiteAtomArray(atom_array: struc.AtomArray) -> struc.AtomArray:
         atom_array.set_annotation('sasa', struc.sasa(atom_array))
         return atom_array
+
     
     def isMutant(self) -> bool:
         """Check if this cif file has mutated residues based on the _entity.pdbx_mutation column.
@@ -262,9 +294,17 @@ class PdbCifFile:
         except DeserializationError as e:
             print(self.name, e)
             return False
+
         
     def getHetero(self, omit_water: bool=True) -> np.ndarray:
-        """Returns the residue names of all hetero atoms
+        """Returns the set of residue names of all hetero atoms.
+        Omits 'HOH' (water molecules) by default.
+
+        Input:
+           - omit_water:bool: Whether to omit 'HOH' molecules from the output [True]
+
+        Returns:
+           - np.ndarray: numpy array containing hetero atom names as strings
         """
         atom_array: struc.AtomArray = self.toBiotiteAtomArray()
         hetero: struc.AtomArray = atom_array[atom_array.hetero==True]
@@ -276,50 +316,150 @@ class PdbCifFile:
 
     @staticmethod
     def atomArrayToDf(atom_array: struc.AtomArray) -> pd.DataFrame:
+        """ Convert an atom array to a pandas dataframe.
+        """
         result: dict = {}
         columns: list = atom_array.get_annotation_categories()
         for annotation in columns:
             result[annotation] = atom_array.get_annotation(annotation)
+            result['x_coord'] = atom_array.coord[:,0]
+            result['y_coord'] = atom_array.coord[:,1]
+            result['z_coord'] = atom_array.coord[:,2]
+            
         return pd.DataFrame.from_dict(result)
 
+
+    def getEnzymmCatalyticSite(self, path_to_enzymm_out: str) ->  tuple | None:
+        """After running enzymm on a collection of cif files, find the catalytic site associated with this entry ID.
+        Note that it is assumed that the enzymm output has been filtered by RMSD beforehand (see EnzymmOut.filterByRMSD())
+        Input:
+           - path_to_enzymm_out: str: path to a .tsv file containing enzymm output (filtered by RMSD such that only one row per query_id is present)
+
+        Returns:
+           - tuple(struc.AtomArray, list[tuple(res_name,chain_id,res_id)])
+           - None: if this query ID cannot be found in the enzymm output (e.g., no catalytic motif was found)
+        """
+        def parseMatchedResidues(s: str) -> list:
+            # Helper function to parse the 'matched_residues' column of enzymm output
+            # Returns [(res_name,chain_id,res_id),(res_name,chain_id,res_id),...]
+            return [tuple(residue.split('_')) for residue in s.split(',')]
+
+        # Read the enzymm output:
+        df: pd.DataFrame = pd.read_csv(path_to_enzymm_out, sep='\t', comment='#')
+        try:
+            # Locate the row where this ID matches the query_id column in enzymm:
+            row = df.loc[df['query_id']==self.getID().upper()].squeeze() # squeeze to force it into 1D (for some reason it returns a dataframe instead of a series)
+            # Apparently row can be empty here (normally it should then raise a KeyError but pandas has its own ways :))
+            if not row.empty:
+                # Parse the matched_residues column using helper function:
+                matched_residues: list = parseMatchedResidues(row['matched_residues'])
+                # Now extract the residues as an atom array:
+                atom_array: struc.AtomArray = self.toBiotiteAtomArray()
+                atom_array = atom_array[(np.isin(atom_array.res_id, [int(res[2]) for res in matched_residues])) & (atom_array.chain_id==matched_residues[0][1])] # assuming all residues are in the same chain for chain_id mask
+                return (atom_array, matched_residues)
+            else:
+                return None
+
+        except KeyError as e: # when pandas does not find the row
+            return None
+        
     
-class PdbCifFileCollection():
+    def getNearestPocket(self, coord: np.ndarray, path_to_fpocket_out: str) -> tuple:
+        """Find the pocket closest to the given coord based on fpocket output
+
+        Input:
+           - coord: np.ndarray: [x y z] coordinates as used by biotite
+           - path_to_fpocket_out: str: A directory containing the fpocket output for this cif file.
+
+        Returns:
+           - tuple(pocket_id: int, distance_to_pocket: float)
+        """
+        # Import here to avoid circular imports:
+        from biolib.files.fpocket_out import FpocketOut
+        
+        # Obtain the centroids of all pockets from the fpocket output:
+        pocket_centroids: dict = FpocketOut(path_to_fpocket_out).getPocketCentroids()
+
+        # Calculate the distance from coord to each centroid:
+        distances: dict = {pocket_id: struc.distance(coord, pocket_coord) for pocket_id, pocket_coord in pocket_centroids.items() }
+
+        # This should return the key (pocket_id) and value (distance) where the value is lowest as a tuple (id,distance):
+        return min(distances.items(), key=lambda x: x[1]) # wtf does lambda x: x[1] do??
+
+    
+    def runFpocket(self, args: str, out_dir: str) -> Path | None:
+        """Run fpocket on this cif file.
+        Returns the Path of the output directory
+        """
+        command: list = ["fpocket"]
+        command.extend(args.split(' '))
+        
+        from subprocess import run
+        out = run(command, check=True, capture_output=True)
+        print(out)
+
+        # This should be the path that fpocket creates upon execution. In the same directory as where the input file was
+        fpocket_out_path: Path = self.full_path.parent / f"{self.full_path.stem}_out"
+        # Check if it exists, then move it to the desired output folder
+        if fpocket_out_path.exists():
+            out_dir: Path = Path(out_dir)
+            out_dir.mkdir(exist_ok=True)
+            return fpocket_out_path.move_into(out_dir)
+
+        else:
+            print(f"could not find fpocket out for {self.name}")
+            return None
+
+
+class CifFileCollection():
     """
     Class that represents a collection of PDBx/mmCIF files and methods to manipulate them.
     """
 
-    def __init__(self, path_to_cif_collection: Path):
+    def __init__(self, path_to_cif_collection: str):
 
+        path: Path = Path(path_to_cif_collection)
         ### DEFENSIVE CHECKS: ###
-        if not isinstance(path_to_cif_collection, Path):
+        if not isinstance(path, Path):
             pass
 
-        if not path_to_cif_collection.is_dir():
+        if not path.is_dir():
             pass
 
-        if not path_to_cif_collection.exists():
+        if not path.exists():
             pass
 
         ### INIT: ###
-        self.full_path: Path = path_to_cif_collection.resolve()  # Full path to the cif collection.
+        self.full_path: Path = path.resolve()  # Full path to the cif collection.
+        self.name: str = path.name
         
-        try:
-            self.pdbcif_files: list = [PdbCifFile(child) for child in path_to_cif_collection.iterdir()]
-
-        except ValueError:
-            print('Some files in this collection are not .cif files. These will be excluded from the object.')
-            self.pdbcif_files: tuple = (PdbCifFile(child) for child in path_to_cif_collection.iterdir() if child.suffix == '.cif')
-
         return None
+
     
     @property
     def size(self):
         """Returns the amount of cif files in this collection.
         """
-        return len(self.pdbcif_files)
+        return len([f for f in self.iterFiles()])
+
+    
+    def merge(self, other):
+        pass
+
+    
+    def iterFiles(self):
+        """
+        Returns an iterator over every cif file in this collection.
+        TO BE IMPLEMENTED
+        """
+        for child in self.full_path.iterdir():
+            if child.suffix=='.cif':
+                yield CifFile(child)
+        
     
     def writeSequencesToFasta(self, out_file: Path) -> dict:
         """
+        DEPRECTATED, NEEDS NEW IMPLEMENTAION
         Writes all the amino acid sequences in this PDBxCIF file collection to a fasta file.
         Header of each entry is the name of the file.
         If multiple amino acid sequences are in the cif file, they will be written as:
@@ -332,7 +472,7 @@ class PdbCifFileCollection():
            -dict: Dictionary containing {'name_of_cif_file': [<list of sequences>]}
         """
         result: dict = {}
-        for pdbcif_file in self.pdbcif_files:
+        for pdbcif_file in self.iterFiles():
             try:
                 aa_sequences: list = pdbcif_file.getAminoAcidSequences()
                 if len(aa_sequences) > 1:
@@ -357,26 +497,49 @@ class PdbCifFileCollection():
         # Return the dictionary for testing purposes:
         return result
 
+
     def getModelCounts(self) -> tuple:
-        result = [pdbcif_file.getModelCount() for pdbcif_file in self.pdbcif_files]
+        result = [pdbcif_file.getModelCount() for pdbcif_file in self.iterFiles()]
         return tuple(result)
     
+
     def getChainCounts(self) -> tuple:
         result: dict = {}
 
-        for pdbcif_file in self.pdbcif_files:
+        for pdbcif_file in self.iterFiles():
             result[pdbcif_file.name] = pdbcif_file.getChainCount()
 
         return result
+
+
+    def getUniqueChainCounts(self) -> dict:
+        """Returns dict of {cif_file_name : unique_chain_counts}
+        """
+        return {cif.name:cif.getUniqueChainCount() for cif in self.iterFiles()}
+
+
+    def plotUniqueChainCounts(self) -> None:
+        data: dict = self.getUniqueChainCounts()
+        counts: np.ndarray = np.array(data.values())
+
+        fig,ax = plt.subplots()
+
+        ax.hist(data)
+
+        plt.show()
+
+        return None
     
+
     def getPolypeptideCounts(self) -> tuple:
         result: list = []
         
-        for pdbcif_file in self.pdbcif_files:
+        for pdbcif_file in self.iterFiles():
             result.append(pdbcif_file.countPolypeptideEntities())
 
         return tuple(result)
     
+
     def plotPolypeptideCount(self) -> None:
         """ Plots the distirbution of polypetide counts for each CIF file in this collection as a histogram.
         """
@@ -390,23 +553,21 @@ class PdbCifFileCollection():
 
         return None
 
-    def getPDBIDs(self) -> list:
-        result: list = []
-        for pdbcif_file in self.pdbcif_files:
-            result.append(pdbcif_file.getPDBID())
 
-        return result
+    def getIDs(self) -> list:
+        return [cif.getID() for cif in self.iterFiles()]
+
     
-    def writePDBIDsToFile(self, out_file: Path) -> None:
-        """Write all the PDB accessions of the collection to a .txt file.
-        Each PDB accession is placed on a new line
+    def writeIDsToFile(self, out_file: str) -> None:
+        """Write all the IDs of the collection to a .txt file.
+        Each ID is placed on a new line
 
         Input:
            - out_file: Path: File path to write the output to
         """
-        result: list = self.getPDBIDs()
+        result: list = self.getIDs()
         
-        with out_file.open("w") as f:
+        with Path(out_file).open("w") as f:
             f.write('\n'.join(result))
 
         return None
@@ -422,6 +583,7 @@ class PdbCifFileCollection():
         }
         df: pd.DataFrame = pd.DataFrame.from_dict(data)
         return df
+
 
     def findTriads(self,
                    pair1: tuple,
@@ -440,10 +602,10 @@ class PdbCifFileCollection():
         count = 1
         
         # Loop over each file 
-        for cif_file in self.pdbcif_files:
+        for cif_file in self.iterFiles():
             # Loop over every triad found in the file
-            for triad in PdbCifFile.findTriads(cif_file.toBiotiteAtomArray(), pair1, pair2, pair3, max_dist_pair1, max_dist_pair2, max_dist_pair3):
-                df: pd.DataFrame = PdbCifFile.atomArrayToDf(triad)
+            for triad in CifFile.findTriads(cif_file.toBiotiteAtomArray(), pair1, pair2, pair3, max_dist_pair1, max_dist_pair2, max_dist_pair3):
+                df: pd.DataFrame = CifFile.atomArrayToDf(triad)
                 # Add additional columns to track file name and triad id:
                 df['file_name'] = cif_file.name
                 df['triad_id'] = count
@@ -451,20 +613,168 @@ class PdbCifFileCollection():
                 # Concatenate to df:
                 result = pd.concat([df, result], ignore_index=True)
 
-        return result
+        # Sometimes the same triad is found across different chains. We remove these dupliactes here:
+        filtered_indices: pd.Index = result.drop_duplicates(subset=['res_id', 'atom_name', 'file_name', 'res_name', 'element']).index
+        
+        return result.iloc[filtered_indices]
              
-    
+
     def getMutants(self):
         """Returns the file names of cif files with mutated residues.
         """
-        return [cif_file.name for cif_file in self.pdbcif_files if cif_file.isMutant()]
+        return [cif_file.name for cif_file in self.iterFiles() if cif_file.isMutant()]
+
+
+    def filterMutants(self, out_dir: str) -> list:
+        """
+        Returns the file names of mutants.
+        Creates a directory (out_dir)  with symlinks to the non-mutants.
+        """
+        # Make the output dir if it does not exist already:
+        out_dir = Path(out_dir)
+        out_dir.mkdir(exist_ok=True)
+
+        mutants: list = []
+        for cif_file in self.iterFiles():
+            # If it's a mutant, add to mutants list
+            if cif_file.isMutant():
+                mutants.append(cif_file.name)
+            # Otherwise make a symbolic link in the new directory:
+            else:
+                path: Path = out_dir / cif_file.name
+                path.symlink_to(cif_file.full_path)
+
+        return mutants
+
+    
+    def filterByChainCount(self, max_chain_count: int, out_dir: str = None) -> list:
+        """Returns the file names of cif files exceeding the chain count
+        Creates a directory (out_dir) containing with symlinks to only the cif files that have less chains than max_chain_count
+        """
+        out_dir = Path(out_dir)
+        out_dir.mkdir(exist_ok=True)
         
-    def getNumberOfLigandBound(self):
-        pass
+        outliers: list = []
+        for cif in self.iterFiles():
+            if cif.getUniqueChainCount() > max_chain_count:
+                outliers.append(cif.name)
+            else:
+                if out_dir is not None:
+                    path: Path = out_dir / cif.name
+                    path.symlink_to(cif.full_path)
+                else:
+                    continue
 
+        return outliers
+
+
+    def getEnzymmCatalyticSites(self, path_to_enzymm_out: str) -> dict:
+        """Returns dictionary {cif_file_name: (catalytic_site_atom_array, parsed_matched_residues)}
+        """
+        return {cif.name:cif.getEnzymmCatalyticSite(path_to_enzymm_out) for cif in self.iterFiles()}
+
+
+    def runFpocketWithEnzymmChains(self, path_to_enzymm_out: str, out_dir: str):
+        """Run fpocket for each cif file in this collection, only specifyfin the chains in which enzymm found a catalytic site
+        Assuming that enzymm out is filtered by lowest rmsd values (see EnzymmOut.filterByRMSD())
+        """
+        from biolib.files.enzymm_out import EnzymmOut
+        enzymm_out: EnzymmOut = EnzymmOut(path_to_enzymm_out)
+        for cif in self.iterFiles():
+            df_filtered = enzymm_out.df.loc[enzymm_out.df['query_id']==cif.getID().upper()]
+            if not df_filtered.empty:
+                chain_to_keep: str = enzymm_out.getQueryChain(cif.getID())
+                cif.runFpocket(f"-f {cif.full_path} -k {chain_to_keep} -M 6.5", out_dir)
+
+        return None
+
+
+    def getCatalyticSitePockets(self, path_to_enzymm_out: str, path_to_fpocket_out_collection: str) -> pd.DataFrame:
+
+        from biolib.files.fpocket_out import FpocketOutCollection, FpocketOut
+        fpocket_out_coll: FpocketOutCollection = FpocketOutCollection(path_to_fpocket_out_collection)
+
+        df_dict: dict = {}
+        for cif in self.iterFiles():
+            catalytic_site: np.ndarray = cif.getEnzymmCatalyticSite(path_to_enzymm_out)
+            if catalytic_site is not None:
+                # Calculate the centroid of the identified catalytic site
+                catalytic_site_coord: np.ndarray = struc.centroid(catalytic_site[0])
+                # Find the fpocket_out corresponding to this id:
+                try:
+                    fpocket_out: FpocketOut = FpocketOut(fpocket_out_coll.getFpocketOutFromID(cif.getID()))
+                except IndexError as e: # the ID does not match:
+                    fpocket_out: FpocketOut = FpocketOut(fpocket_out_coll.getFpocketOutFromID(cif.stem))
+                # Get the nearest pocket:
+                nearest_pocket: tuple = cif.getNearestPocket(catalytic_site_coord, fpocket_out.full_path)
+                pocket_info: dict = fpocket_out.getPocketInfoAt(nearest_pocket[0])
+                # Add the distance as well:
+                pocket_info['distance_to_catalytic_site'] = nearest_pocket[1]
+                pocket_info['pocket_id'] = nearest_pocket[0]
+                # Now add to the master dictionary:
+                df_dict[cif.getID()]=pocket_info
+
+            else:
+                continue
+
+        return pd.DataFrame.from_dict(df_dict, orient='index')
+
+    
     def getLigands(self):
-        pass
+        ligands: list = []
+        for cif_file in self.iterFiles():
+            ligands.extend(list(cif_file.getHetero()))
+            
+        return ligands
 
+
+    def filterFoldseekClustering(self, path_to_foldseek_cluster: str, out_dir: str) -> None:
+        """Makes a new directory containing only the foldseek cluster representatives in the adjacency matrix from foldseek
+        (which might also have been length filtered separately).
+        """
+        out_dir = Path(out_dir)
+        out_dir.mkdir(exist_ok=True)
+                
+        df_adjacency: pd.DataFrame = pd.read_csv(path_to_foldseek_cluster, names=['representative', 'node'])
+        rep_list: list = list(df_adjacency['representative'].unique())
+        rep_list_ids = [s.split('_')[0] for s in list(df_adjacency['representative'].unique())]
+        
+        for cif in self.iterFiles():
+            if cif.stem.split('_')[0] in rep_list_ids:
+                path: Path = out_dir / cif.name
+                path.symlink_to(cif.full_path)
+            
+
+    def removeIDs(self, path_to_ids: str, out_dir: str = None) -> list:
+        """Removes entries with ids (PDB accessions/AF accessions) in the given list.
+        Makes new directory (out_dir) with symlinks
+        Returns the IDs of cif files that were removed
+        """
+        # Retrieve the list of accessions to be removed:
+        accessions: list = []
+        with Path(path_to_ids).open('r') as f:
+            for line in f:
+                accessions.append(line.strip())
+
+        # Make the output directory:
+        out_dir: Path = Path(out_dir)
+        out_dir.mkdir(exist_ok=True)
+
+        # Initiate list that will hold the IDs of the files that were removed
+        removed: list = []
+        # Loop over the cif files:
+        for cif in self.iterFiles():
+            # Remove if it is in the list:
+            if (cif.getID() in accessions) or (cif.stem in accessions):
+                removed.append(cif.getID())
+            # Create symlink to og file in out_dir:
+            else:
+                if out_dir is not None:
+                    path: Path = out_dir / cif.name
+                    path.symlink_to(cif.full_path)
+
+        return removed
+    
     def alignPairwise(self):
         pass
 

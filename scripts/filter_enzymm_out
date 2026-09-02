@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+
+import sys
+from biolib.files.enzymm_out import EnzymmOut
+
+def main():
+    in_file: str = sys.argv[1]
+    out_file: str = sys.argv[2]
+
+    EnzymmOut(in_file).filterByRMSD(out_file)
+
+if __name__=="__main__":
+    main()
+
+    
