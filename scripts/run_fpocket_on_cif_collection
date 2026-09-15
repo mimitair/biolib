@@ -1,0 +1,45 @@
+#!/usr/bin/env python3
+
+# standard lib:
+import sys
+from pathlib import Path
+import datetime
+import argparse
+
+# Custom imports:
+from biolib.files.pdbcif import CifFileCollection
+
+FPOCKET_ARGS: str = '-M 6.5'
+
+def createParser():
+    parser = argparse.ArgumentParser(prog='run_fpocket',
+                                     description='Execute fpocket for all cif files in the given collection.',
+                                     epilog='Created by mimitair.')
+
+    parser.add_argument('path_to_cif_collection', action='store', type=Path, help='Path to the cif collection.')
+    parser.add_argument('out_dir', action='store', type=Path, help='Directory to store the fpocket output.')
+
+    return parser
+    
+def main():
+    args = createParser().parse_args()
+    mycoll = CifFileCollection(args.path_to_cif_collection)
+    print(f'Amount of files in cif collection: {mycoll.size}')
+    print('Running fpocket...')
+    mycoll.runFpocket(FPOCKET_ARGS, args.out_dir)
+
+if __name__ == "__main__":
+
+    start = datetime.datetime.now()
+    print(f"--- SCRIPT: {__file__} ---")
+    print(f"--- COMMAND: {' '.join(sys.argv)} ---")
+    print(f"--- START: {start} ---")
+
+    main()
+    
+    end = datetime.datetime.now()
+    print(f"--- END: {end} ---")
+    print(f"--- TIME ELAPSED: {end - start} ---")
+
+
+

@@ -137,12 +137,12 @@ class CifFile:
            - struc.AtomArray: atom_site data as a biotite AtomArray object
         """
         try:
-            return strucio.load_structure(self.full_path, include_bonds=True, model=1, extra_fields=['atom_id', 'charge'])
+            return strucio.load_structure(self.full_path, include_bonds=True, model=1, extra_fields=['atom_id', 'charge', 'b_factor', 'occupancy'])
         
         except KeyError as e:
             mycif: pdbxio.CIFFile = self.toBiotiteCifFile()
             mycif.block['atom_site']['pdbx_PDB_model_num'] = np.ones(len(mycif.block['atom_site']['id'].as_array()), dtype=np.int32)
-            return pdbxio.get_structure(mycif, include_bonds=True, model=1, extra_fields=['atom_id', 'charge'])
+            return pdbxio.get_structure(mycif, include_bonds=True, model=1, extra_fields=['atom_id', 'charge', 'b_factor', 'occupancy'])
 
         
     def getChainCount(self) -> int:
@@ -322,9 +322,10 @@ class CifFile:
         columns: list = atom_array.get_annotation_categories()
         for annotation in columns:
             result[annotation] = atom_array.get_annotation(annotation)
-            result['x_coord'] = atom_array.coord[:,0]
-            result['y_coord'] = atom_array.coord[:,1]
-            result['z_coord'] = atom_array.coord[:,2]
+
+        result['x_coord'] = atom_array.coord[:,0]
+        result['y_coord'] = atom_array.coord[:,1]
+        result['z_coord'] = atom_array.coord[:,2]
             
         return pd.DataFrame.from_dict(result)
 
@@ -387,12 +388,12 @@ class CifFile:
         return min(distances.items(), key=lambda x: x[1]) # wtf does lambda x: x[1] do??
 
     
-    def runFpocket(self, args: str, out_dir: str) -> Path | None:
+    def runFpocket(self, args: str, out_dir: str|Path) -> None:
         """Run fpocket on this cif file.
-        Returns the Path of the output directory
         """
-        command: list = ["fpocket"]
-        command.extend(args.split(' '))
+        command: list = ["fpocket", "-f", f"{self.full_path}"]
+        if args: # If non-empty arguments are given
+            command.extend(args.split(' '))
         
         from subprocess import run
         out = run(command, check=True, capture_output=True)
@@ -404,19 +405,76 @@ class CifFile:
         if fpocket_out_path.exists():
             out_dir: Path = Path(out_dir)
             out_dir.mkdir(exist_ok=True)
-            return fpocket_out_path.move_into(out_dir)
+            fpocket_out_path.move_into(out_dir)
+            return None
 
         else:
             print(f"could not find fpocket out for {self.name}")
             return None
 
 
+    def chainToCifFile(self, chain_id: str) -> pdbxio.CIFFile:
+        """
+        Returns a CIFFile object only including the specified chain (most of the dictionaries are lost, only atom_site and chem_comp...)
+        """
+        atom_array: struc.AtomArray = self.toBiotiteAtomArray()
+        atom_array = atom_array[(struc.filter_amino_acids(atom_array)) & (atom_array.chain_id == chain_id)]
+
+        # Initiate new CIFFile object with the same ID:
+        categories: pdbxio.CIFCategory = pdbxio.CIFCategory({'id':self.getID()})
+        block: pdbxio.CIFBlock = pdbxio.CIFBlock({'entry':categories})
+        cif_file: pdbxio.CIFFile = pdbxio.CIFFile({self.getID():block})
+
+        # Write the atom array to the cif file and return:
+        pdbxio.set_structure(cif_file, atom_array)
+        return cif_file
+
+
+    def dockToLigand(self,
+                     ligand: struc.AtomArray,
+                     docking_coord: np.ndarray,
+                     search_space: list,
+                     path_to_vina_bin: str|Path):
+        """
+        """
+        import biotite.application.autodock as autodock
+        # Prepare the receptor:
+        receptor: struc.AtomArray = self.toBiotiteAtomArray()
+        receptor = receptor[struc.filter_amino_acids(receptor)]
+        receptor.charge = struc.partial_charges(receptor)  # Adds Gasteiger charges
+
+        # Start the autodock vina app
+        app = autodock.VinaApp(ligand, receptor, docking_coord, search_space, bin_path=path_to_vina_bin)
+        
+        # Initialize some parameters:
+        app.set_seed(0)
+        app.set_cpu(1)
+        app.set_max_number_of_models(100)
+        app.set_energy_range(100.0)
+
+        # Start docking run
+        app.start()
+        app.join()
+
+        # Get docking coordinates for each binding mode
+        docked_coord: np.ndarray = app.get_ligand_coord()
+        # Create an AtomArrayStack for all docked binding modes
+        docked_ligand: struc.AtomArrayStack = struc.from_template(ligand, docked_coord)
+        # As Vina discards all nonpolar hydrogen atoms, their respective coordinates are NaN -> remove these atoms
+        docked_ligand = docked_ligand[..., ~np.isnan(docked_ligand.coord[0]).any(axis=-1)]
+        
+        # Get energies for each binding pose and add to the atom array stack
+        energies: np.ndarray = app.get_energies()
+
+        return docked_ligand, energies
+
+    
 class CifFileCollection():
     """
     Class that represents a collection of PDBx/mmCIF files and methods to manipulate them.
     """
 
-    def __init__(self, path_to_cif_collection: str):
+    def __init__(self, path_to_cif_collection: str|Path):
 
         path: Path = Path(path_to_cif_collection)
         ### DEFENSIVE CHECKS: ###
@@ -674,21 +732,15 @@ class CifFileCollection():
         return {cif.name:cif.getEnzymmCatalyticSite(path_to_enzymm_out) for cif in self.iterFiles()}
 
 
-    def runFpocketWithEnzymmChains(self, path_to_enzymm_out: str, out_dir: str):
-        """Run fpocket for each cif file in this collection, only specifyfin the chains in which enzymm found a catalytic site
-        Assuming that enzymm out is filtered by lowest rmsd values (see EnzymmOut.filterByRMSD())
+    def runFpocket(self, args: str, out_dir: str|Path) -> None:
+        """Run fpocket for each file in this collection.
         """
-        from biolib.files.enzymm_out import EnzymmOut
-        enzymm_out: EnzymmOut = EnzymmOut(path_to_enzymm_out)
         for cif in self.iterFiles():
-            df_filtered = enzymm_out.df.loc[enzymm_out.df['query_id']==cif.getID().upper()]
-            if not df_filtered.empty:
-                chain_to_keep: str = enzymm_out.getQueryChain(cif.getID())
-                cif.runFpocket(f"-f {cif.full_path} -k {chain_to_keep} -M 6.5", out_dir)
+            cif.runFpocket(args, out_dir)
 
         return None
-
-
+    
+   
     def getCatalyticSitePockets(self, path_to_enzymm_out: str, path_to_fpocket_out_collection: str) -> pd.DataFrame:
 
         from biolib.files.fpocket_out import FpocketOutCollection, FpocketOut
@@ -728,23 +780,35 @@ class CifFileCollection():
         return ligands
 
 
-    def filterFoldseekClustering(self, path_to_foldseek_cluster: str, out_dir: str) -> None:
-        """Makes a new directory containing only the foldseek cluster representatives in the adjacency matrix from foldseek
-        (which might also have been length filtered separately).
+    def extractFoldseekClusters(self, path_to_foldseek_cluster: str, out_dir: str) -> None:
+        """Makes a new directory containing only the foldseek cluster representatives in the adjacency matrix from foldseek (which might also have been length filtered separately).
+        This function will only retain the appropriate chains that foldseek mentions (use foldseek with chain-name-mode 1 !!)
+        
+        Input:
+           - path_to_foldseek_cluster: str: Usually a .tsv file
+           - out_dir: str: Directory to which the 
         """
+        # Prepare the output dir:
         out_dir = Path(out_dir)
         out_dir.mkdir(exist_ok=True)
-                
+
+        # read cluster file as pandas dataframe
         df_adjacency: pd.DataFrame = pd.read_csv(path_to_foldseek_cluster, names=['representative', 'node'])
-        rep_list: list = list(df_adjacency['representative'].unique())
-        rep_list_ids = [s.split('_')[0] for s in list(df_adjacency['representative'].unique())]
+        # Extract the list of representatives, their IDs (first part of the string) and chain IDs (last part of the string)
+        rep_list: dict = {s.split('_')[0]:s.split('_')[-1] for s in list(df_adjacency['representative'].unique())}
         
         for cif in self.iterFiles():
-            if cif.stem.split('_')[0] in rep_list_ids:
-                path: Path = out_dir / cif.name
-                path.symlink_to(cif.full_path)
+            file_id: str = cif.stem.split('_')[0] # This is the first part of the file used to match it to the cluster list from foldseek
+            if file_id in list(rep_list.keys()):
+                chain_id: str = rep_list[file_id]
+                cif_file: pdbxio.CIFFile = cif.chainToCifFile(chain_id)
+                file_name: str = cif.stem + f'_{chain_id}.cif'
+                out_path: Path = out_dir / file_name
+                cif_file.write(out_path)
             
+        return None
 
+    
     def removeIDs(self, path_to_ids: str, out_dir: str = None) -> list:
         """Removes entries with ids (PDB accessions/AF accessions) in the given list.
         Makes new directory (out_dir) with symlinks

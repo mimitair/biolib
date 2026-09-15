@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+
+import sys
+from biolib.files.enzymm_out import EnzymmOut
+
+#!/usr/bin/env python3
+
+# Standard library imports:
+import sys
+from pathlib import Path
+import datetime
+import argparse
+
+def createParser():
+    parser = argparse.ArgumentParser(prog='filter_enzymm_out_by_rmsd',
+                                     description='Filters the output file of enzymm (.tsv), keeping only the rows with the lowest RMSD value for each query.',
+                                     epilog='Created by mimitair.')
+
+    parser.add_argument('path_to_enzymm_out', action='store', type=Path, help='Path to the enzymm output .tsv file')
+    parser.add_argument('out_file', action='store', type=Path, help='Path to the output file (filtered .tsv file)')
+    
+    return parser
+
+
+def main():
+    args = createParser().parse_args()
+
+    enzymm_out: EnzymmOut = EnzymmOut(args.path_to_enzymm_out)
+    print(f"Amount of rows in enzymm output: {len(enzymm_out.df)}")
+
+    filtered = enzymm_out.filterByRMSD(args.out_file)
+    print(f"Amount of rows in filtered enzymm output: {len(filtered)}")
+    
+
+if __name__ == "__main__":
+
+    start = datetime.datetime.now()
+    print(f"--- SCRIPT: {__file__} ---")
+    print(f"--- COMMAND: {' '.join(sys.argv)} ---")
+    print(f"--- START: {start} ---")
+
+    main()
+    
+    end = datetime.datetime.now()
+    print(f"--- END: {end} ---")
+    print(f"--- TIME ELAPSED: {end - start} ---")

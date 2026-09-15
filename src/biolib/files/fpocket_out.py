@@ -1,5 +1,5 @@
 import biotite.structure as struc
-import biotite.structure.io.pdbx as pdbxio
+import biotite.structure.io as strucio
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -73,8 +73,16 @@ class FpocketOut():
         # Return as dict (no iloc because it is zero-based, indexing starts at 1 as the pockets in the original output file)
         return df.loc[pocket_id].to_dict()
     
-    def getAminoAcidsNearPocket(self, pocket_id: int, zone: float) -> tuple:
-        pass
+    def getAminoAcidsContactingPocket(self, pocket_id: int) -> tuple:
+        """
+        Returns the residue names of all amino acids contacting the alpha spheres of the given pocket.
+        """
+        # Define the path to the file that stores the contacting amino acid residues:
+        path_to_pocket: Path = self.full_path / 'pockets' / f'pocket{pocket_id}_atm.cif'
+
+        # Load as cif file and extract the res names:
+        atom_array = CifFile(path_to_pocket).toBiotiteAtomArray()
+        return atom_array.res_name
 
         
 class FpocketOutCollection():

@@ -1,28 +1,47 @@
 #!/usr/bin/env python3
 
+# Standard lib:
 import sys
 from pathlib import Path
 import datetime
+import argparse
+
+# Custom imports:
 from biolib.files.pdbcif import CifFileCollection
 
+def createParser():
+    parser = argparse.ArgumentParser(prog='get_catalytic_site_pockets_in_cif_collection',
+                                     description='Given a cif collection, enzymm output, and fpocket output, return a .csv file containing the properties of the pocket closest to the catalytic site identified by enzymm.',
+                                     epilog='Created by mimitair.'
+                                     )
+
+    parser.add_argument('path_to_cif_collection', action='store', type=Path, help='Path to the cif collection.')
+    parser.add_argument('path_to_enzymm_out', action='store', type=Path, help='Path to the enzymm output (filtered by rmsd!). Typicially a .tsv file.')
+    parser.add_argument('path_to_fpocket_out', action='store', type=Path, help='Path to the collection storing fpocket output for each cif file.')
+    parser.add_argument('out_file', action='store', type=Path, help='Path to the output .csv file.')
+    
+    return parser
+
 def main():
-    in_dir: Path = Path(sys.argv[1]).resolve()
-    enzymm_out_path: Path = Path(sys.argv[2]).resolve()
-    fpocket_out_coll: Path = Path(sys.argv[3]).resolve()
-    out_file: Path = Path(sys.argv[4]).resolve()
+    args = createParser().parse_args()
+    
+    mycoll = CifFileCollection(args.path_to_cif_collection)
+    print(f'Amount of files in cif collection: {mycoll.size}')
 
-    mycoll = CifFileCollection(in_dir)
+    df = mycoll.getCatalyticSitePockets(args.path_to_enzymm_out, args.path_to_fpocket_out)
 
-    df = mycoll.getCatalyticSitePockets(enzymm_out_path, fpocket_out_coll)
+    df.to_csv(args.out_file, index_label='query_id')
 
-    df.to_csv(out_file, index_label='query_id')
     
 if __name__ == "__main__":
 
+    start = datetime.datetime.now()
     print(f"--- SCRIPT: {__file__} ---")
     print(f"--- COMMAND: {' '.join(sys.argv)} ---")
-    print(f"--- START: {datetime.datetime.now()} ---")
+    print(f"--- START: {start} ---")
 
     main()
     
-    print(f"--- END: {datetime.datetime.now()} ---")
+    end = datetime.datetime.now()
+    print(f"--- END: {end} ---")
+    print(f"--- TIME ELAPSED: {end - start} ---")

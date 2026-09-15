@@ -40,6 +40,8 @@ class EasyClustOut():
         """
         return self.df['representative'].unique()
 
+    def summarize():
+        pass
     
     def filterRepresentativesByLength(self, min_length: int, max_length: int, out_dir: str = None) -> pd.DataFrame:
         """
