@@ -7,7 +7,7 @@ class SDFFile():
         pass
 
     @staticmethod
-    def createFromSmiles(smiles: str, out_file: str|Path) -> SDFFile:
+    def createFromSmiles(smiles: str, out_file: str|Path) -> Self:
         mol = Chem.MolFromSmiles(smiles)
         with Chem.SDWriter(out_file) as writer:
             writer.write(mol)
@@ -15,4 +15,4 @@ class SDFFile():
         return None
 
     def prepareForDocking(self) -> struc.AtomArray:
-        
+        pass
