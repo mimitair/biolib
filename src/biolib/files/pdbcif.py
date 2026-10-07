@@ -55,6 +55,15 @@ class CifFile:
         
         except KeyError as e: # When the 'id' column cannot be found
             return self.stem.split('_')[0].strip().upper()
+
+
+    def checkNonStandardResidues(self):
+        pass
+
+    
+    def checkMissingAtoms(self):
+        pass
+
     
     def getUniprotAccession(self) -> str:
         """
@@ -131,7 +140,7 @@ class CifFile:
     def toBiotiteAtomArray(self) -> struc.AtomArray:
         """Convert the _atom_site data block to a biotite AtomArray object.
         The first model is chosen by default.
-        The atom_id and charge annotoation categories are added by default.
+        The atom_id, charge, bfactor and occupancy annotation categories are added by default.
 
         Returns:
            - struc.AtomArray: atom_site data as a biotite AtomArray object
@@ -139,7 +148,7 @@ class CifFile:
         try:
             return strucio.load_structure(self.full_path, include_bonds=True, model=1, extra_fields=['atom_id', 'charge', 'b_factor', 'occupancy'])
         
-        except KeyError as e:
+        except KeyError as e: # lacking model_num column?
             mycif: pdbxio.CIFFile = self.toBiotiteCifFile()
             mycif.block['atom_site']['pdbx_PDB_model_num'] = np.ones(len(mycif.block['atom_site']['id'].as_array()), dtype=np.int32)
             return pdbxio.get_structure(mycif, include_bonds=True, model=1, extra_fields=['atom_id', 'charge', 'b_factor', 'occupancy'])
@@ -329,7 +338,6 @@ class CifFile:
             
         return pd.DataFrame.from_dict(result)
 
-
     def getEnzymmCatalyticSite(self, path_to_enzymm_out: str) ->  tuple | None:
         """After running enzymm on a collection of cif files, find the catalytic site associated with this entry ID.
         Note that it is assumed that the enzymm output has been filtered by RMSD beforehand (see EnzymmOut.filterByRMSD())
@@ -363,8 +371,30 @@ class CifFile:
 
         except KeyError as e: # when pandas does not find the row
             return None
-        
+
+
+    def getEnzymmCatalyticCenter(self, path_to_enzymm_out: str) -> np.ndarray:
+        catalytic_residues = self.getEnzymmCatalyticSite(path_to_enzymm_out)
+        if catalytic_residues is None:
+            return None
+        return struc.centroid(catalytic_residues[0])
+
     
+    def writeAutodockVinaConfig(self, path_to_enzymm_out: str, box_size: int, out_dir: str) -> None:
+        catalytic_center: np.ndarray = self.getEnzymmCatalyticCenter(path_to_enzymm_out)
+        if catalytic_center is None:
+            print(f"Could not find catalytic center for {self.name}. Skipping config write.")
+
+        else:
+            out_dir = Path(out_dir)
+            out_dir.mkdir(exist_ok=True)
+            out_file = out_dir / f"{self.stem}_vina_config.txt"
+
+            with out_file.open('w') as f:
+                f.write(f"center_x = {catalytic_center[0]}\ncenter_y = {catalytic_center[1]}\ncenter_z = {catalytic_center[2]}\nsize_x = {box_size}\nsize_y = {box_size}\nsize_z = {box_size}")
+
+        return None
+        
     def getNearestPocket(self, coord: np.ndarray, path_to_fpocket_out: str) -> tuple:
         """Find the pocket closest to the given coord based on fpocket output
 
@@ -412,23 +442,33 @@ class CifFile:
             print(f"could not find fpocket out for {self.name}")
             return None
 
+    @staticmethod
+    def atomArrayToCifFile(atom_array: struc.AtomArray, id: str) -> pdbxio.CifFile:
+        """ Converts the given atom array to biotite CIFFile object
+        """
+        # Initiate new CIFFile object with the given ID:
+        categories: pdbxio.CIFCategory = pdbxio.CIFCategory({'id':id})
+        block: pdbxio.CIFBlock = pdbxio.CIFBlock({'entry':categories})
+        cif_file: pdbxio.CIFFile = pdbxio.CIFFile({id:block})
+
+        # Write the atom array to the cif file and return:
+        pdbxio.set_structure(cif_file, atom_array)
+
+        return cif_file
 
     def chainToCifFile(self, chain_id: str) -> pdbxio.CIFFile:
         """
-        Returns a CIFFile object only including the specified chain (most of the dictionaries are lost, only atom_site and chem_comp...)
+        Returns a CIFFile object only including the specified chain (most of the dictionaries are lost, only atom_site and chem_comp...).
+        Only amino acids are retained using the biotite filter_amino_acids function.
         """
         atom_array: struc.AtomArray = self.toBiotiteAtomArray()
         atom_array = atom_array[(struc.filter_amino_acids(atom_array)) & (atom_array.chain_id == chain_id)]
 
-        # Initiate new CIFFile object with the same ID:
-        categories: pdbxio.CIFCategory = pdbxio.CIFCategory({'id':self.getID()})
-        block: pdbxio.CIFBlock = pdbxio.CIFBlock({'entry':categories})
-        cif_file: pdbxio.CIFFile = pdbxio.CIFFile({self.getID():block})
+        # Convert to CifFile object:
+        cif_file = self.atomArrayToCifFile(atom_array, self.getID())
 
-        # Write the atom array to the cif file and return:
-        pdbxio.set_structure(cif_file, atom_array)
         return cif_file
-
+    
 
     def dockToLigand(self,
                      ligand: struc.AtomArray,
@@ -449,7 +489,7 @@ class CifFile:
         # Initialize some parameters:
         app.set_seed(0)
         app.set_cpu(1)
-        app.set_max_number_of_models(100)
+        app.set_max_number_of_models(32)
         app.set_energy_range(100.0)
 
         # Start docking run
@@ -463,10 +503,30 @@ class CifFile:
         # As Vina discards all nonpolar hydrogen atoms, their respective coordinates are NaN -> remove these atoms
         docked_ligand = docked_ligand[..., ~np.isnan(docked_ligand.coord[0]).any(axis=-1)]
         
-        # Get energies for each binding pose and add to the atom array stack
+        # Get energies for each binding pose
         energies: np.ndarray = app.get_energies()
 
         return docked_ligand, energies
+
+
+    def getDiameter(self) -> float:
+        """ Get the diameter of a structure defined as the maximum pairwise atom distance.
+        Adapted from biotite examples. Does not differentiate different chains
+        """
+        # Convert to atom array:
+        atom_array: struc.AtomArray = self.toBiotiteAtomArray()
+
+        # Remove all non-amino acids
+        atom_array = atom_array[struc.filter_amino_acids(atom_array)]
+        coord = atom_array.coord
+        # Calculate all pairwise difference vectors
+        diff = coord[:, np.newaxis, :] - coord[np.newaxis, :, :]
+        # Calculate absolute of difference vectors -> square distances
+        sq_dist = np.sum(diff * diff, axis=-1)
+        # Maximum distance is diameter
+        diameter = np.sqrt(np.max(sq_dist))
+
+        return diameter
 
     
 class CifFileCollection():
@@ -501,14 +561,9 @@ class CifFileCollection():
         return len([f for f in self.iterFiles()])
 
     
-    def merge(self, other):
-        pass
-
-    
     def iterFiles(self):
         """
-        Returns an iterator over every cif file in this collection.
-        TO BE IMPLEMENTED
+        Returns an iterator over every cif file in this collection
         """
         for child in self.full_path.iterdir():
             if child.suffix=='.cif':
@@ -561,7 +616,7 @@ class CifFileCollection():
         return tuple(result)
     
 
-    def getChainCounts(self) -> tuple:
+    def getChainCounts(self) -> dict:
         result: dict = {}
 
         for pdbcif_file in self.iterFiles():
@@ -742,6 +797,8 @@ class CifFileCollection():
     
    
     def getCatalyticSitePockets(self, path_to_enzymm_out: str, path_to_fpocket_out_collection: str) -> pd.DataFrame:
+        """ Based on enzymm and fpocket output, find the pockets closest to the catalytic site.
+        """
 
         from biolib.files.fpocket_out import FpocketOutCollection, FpocketOut
         fpocket_out_coll: FpocketOutCollection = FpocketOutCollection(path_to_fpocket_out_collection)
@@ -772,12 +829,12 @@ class CifFileCollection():
         return pd.DataFrame.from_dict(df_dict, orient='index')
 
     
-    def getLigands(self):
-        ligands: list = []
+    def getHeteroAtoms(self):
+        heteros: list = []
         for cif_file in self.iterFiles():
-            ligands.extend(list(cif_file.getHetero()))
+            heteros.extend(list(cif_file.getHetero()))
             
-        return ligands
+        return heteros
 
 
     def extractFoldseekClusters(self, path_to_foldseek_cluster: str, out_dir: str) -> None:
@@ -838,7 +895,22 @@ class CifFileCollection():
                     path.symlink_to(cif.full_path)
 
         return removed
-    
+
+    def writeAutodockVinaConfigs(self, path_to_enzymm_out: str, box_size: int, out_dir: str) -> None:
+        for cif in self.iterFiles():
+            cif.writeAutodockVinaConfig(path_to_enzymm_out, box_size, out_dir)
+
+
+    def plotDiameters(self) -> None:
+        data: list = []
+        for cif in self.iterFiles():
+            data.append(cif.getDiameter())
+
+        fig,ax= plt.subplots()
+        ax.hist(data)
+        plt.show()
+
+        
     def alignPairwise(self):
         pass
 

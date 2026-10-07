@@ -1,6 +1,8 @@
 import requests
 
 class Uniprot:
+    API_ENDPOINT: str = "https://rest.uniprot.org/"
+    
     def __init__(self):
         pass
 
